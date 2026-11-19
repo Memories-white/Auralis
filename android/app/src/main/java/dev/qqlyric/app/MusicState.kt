@@ -19,6 +19,7 @@ fun JSONObject.artwork():String=optString("coverUrl").takeIf{it.startsWith("http
 /** Account/protocol state stays independent of the Compose page tree. */
 class MusicState(private val context:Context){
     private val worker=Executors.newSingleThreadExecutor()
+    private val feedWorker=Executors.newSingleThreadExecutor()
     private val ui=Handler(Looper.getMainLooper())
     private val secure=SecureStore(context)
     private val prefs=context.getSharedPreferences("library",Context.MODE_PRIVATE)
@@ -28,6 +29,16 @@ class MusicState(private val context:Context){
     private var playGeneration=0
     private var searchGeneration=0
     private var playlistGeneration=0
+    private var homeGeneration=0
+    private var feedGeneration=0
+    private var feedPage=1
+    var discoverySongs by mutableStateOf(emptyList<JSONObject>())
+    var discoveryLoading by mutableStateOf(false)
+    var discoveryMore by mutableStateOf(true)
+    var discoveryError by mutableStateOf("")
+    var collectionBusy by mutableStateOf(false)
+    var collectionMessage by mutableStateOf("")
+    var detailRevision by mutableIntStateOf(0)
     private val backStack=mutableListOf<String>()
     private var pendingMid:String?=null
     private var pendingToken:String?=null
@@ -79,7 +90,7 @@ class MusicState(private val context:Context){
     init{prefs.edit().putString("ui_style","MIUIX").apply();refreshHome();if(loggedIn)refreshProfile()}
     private fun call(name:String,args:JSONObject=JSONObject(),done:(JSONObject)->Unit){
         val expected=epoch
-        worker.execute{
+        (if(name=="recommend")feedWorker else worker).execute{
             val response=runCatching{JSONObject(RustCore.call(name,args.toString()))}.getOrElse{JSONObject().put("ok",false).put("error",it.message?:context.getString(R.string.request_failed))}
             ui.post{if(alive&&expected==epoch)done(response)}
         }
@@ -93,8 +104,32 @@ class MusicState(private val context:Context){
     }
     fun refreshHome(){
         if(!loggedIn){status=context.getString(R.string.login_recommendations);return}
+        val generation=++homeGeneration
         busy=true;status=context.getString(R.string.loading_recommendations)
-        call("home",JSONObject().put("session",session)){result->busy=false;if(!failed(result)){home=result.getJSONObject("data");status=""}}
+        call("home",JSONObject().put("session",session)){result->
+            if(generation!=homeGeneration)return@call
+            busy=false;if(!failed(result)){home=result.getJSONObject("data");status="";resetDiscovery()}
+        }
+    }
+    private fun resetDiscovery(){feedGeneration++;feedPage=1;discoverySongs=emptyList();discoveryLoading=false;discoveryMore=true;discoveryError="";loadMoreDiscovery()}
+    fun loadMoreDiscovery(){
+        if(!loggedIn||discoveryLoading||!discoveryMore)return
+        val request=feedGeneration
+        val daily=home.optJSONArray("daily")?.objects().orEmpty()
+        discoveryLoading=true;discoveryError=""
+        call("recommend",JSONObject().put("session",session).put("page",feedPage)
+            .put("exclude",JSONArray((daily+discoverySongs).map{it.optString("mid")}))
+            .put("excludeIds",JSONArray(daily.map{it.optLong("id")}))){result->
+            if(request!=feedGeneration)return@call
+            discoveryLoading=false
+            if(!result.optBoolean("ok")){discoveryError=result.optString("error",context.getString(R.string.request_retry));return@call}
+            val data=result.getJSONObject("data")
+            val blocked=(home.optJSONArray("daily")?.objects().orEmpty()+discoverySongs).map{it.optString("mid")}.toHashSet()
+            val added=data.optJSONArray("songs")?.objects().orEmpty().filter{blocked.add(it.optString("mid"))}
+            discoverySongs=discoverySongs+added;feedPage=data.optInt("nextPage",feedPage+1)
+            discoveryMore=data.optBoolean("hasMore")&&added.isNotEmpty()
+            if(BuildConfig.DEBUG)android.util.Log.i("AuralisDiscovery","batch=${added.size} total=${discoverySongs.size} next=$feedPage more=$discoveryMore dailyOverlap=${discoverySongs.count{s->daily.any{it.optString("mid")==s.optString("mid")}}}")
+        }
     }
     fun refreshLibrary(){
         if(!loggedIn)return
@@ -109,7 +144,7 @@ class MusicState(private val context:Context){
         if(destination=="mine"&&loggedIn&&library.length()==0)refreshLibrary()
     }
     fun back(){playlistGeneration++;searchGeneration++;page=if(backStack.isNotEmpty())backStack.removeAt(backStack.lastIndex)else "home";status="";busy=false}
-    fun openSongs(songs:List<JSONObject>,label:String){if(page!="songs")parentPage=page;detailTitle=label;tracks=songs;navigate("songs")}
+    fun openSongs(songs:List<JSONObject>,label:String){if(page!="songs")parentPage=page;detailTitle=label;tracks=songs;detailRevision++;navigate("songs")}
     fun daily(){
         val songs=home.optJSONArray("daily")?.objects().orEmpty()
         if(songs.isNotEmpty())openSongs(songs,context.getString(R.string.daily_mix))
@@ -134,6 +169,28 @@ class MusicState(private val context:Context){
         }
     }
     fun clearSearchHistory(){searchHistory=emptyList();prefs.edit().remove("search_history").apply()}
+    fun currentSong():JSONObject?=queue.firstOrNull{it.optString("mid")==mid}
+    fun cloudLiked(song:JSONObject)=library.optJSONArray("likes")?.objects().orEmpty().any{it.optString("mid")==song.optString("mid")}
+    fun writablePlaylists()=library.optJSONArray("playlists")?.objects().orEmpty().filter{!it.optBoolean("saved")&&it.optLong("dirid")>0}
+    fun addCloudSong(song:JSONObject,dirid:Long){
+        if(collectionBusy)return
+        if(!loggedIn){collectionMessage=context.getString(R.string.login_library_summary);return}
+        if(dirid==201L&&cloudLiked(song)){collectionMessage=context.getString(R.string.already_liked);return}
+        collectionBusy=true;collectionMessage=context.getString(R.string.adding_song)
+        call("add_song",JSONObject().put("session",session).put("dirid",dirid).put("id",song.optLong("id"))){result->
+            collectionBusy=false
+            if(!result.optBoolean("ok")){collectionMessage=result.optString("error",context.getString(R.string.request_retry));return@call}
+            val data=result.getJSONObject("data")
+            if(data.has("confirmed")&&!data.optBoolean("confirmed")){
+                collectionMessage=context.getString(R.string.song_add_accepted)
+                if(BuildConfig.DEBUG)android.util.Log.i("AuralisCollections","acknowledged; response keys=${data.optJSONArray("responseKeys")}")
+                refreshLibrary();return@call
+            }
+            collectionMessage=context.getString(if(data.optBoolean("alreadyExists"))R.string.song_already_present else R.string.song_added)
+            if(dirid==201L){val updated=library.optJSONArray("likes")?.objects().orEmpty().filterNot{it.optString("mid")==song.optString("mid")};library=JSONObject(library.toString()).put("likes",JSONArray(listOf(song)+updated))}
+            refreshLibrary()
+        }
+    }
     fun play(songs:List<JSONObject>,index:Int){
         if(index !in songs.indices)return
         val preferred=audioQuality;val fallback=qualityFallback
@@ -221,6 +278,6 @@ class MusicState(private val context:Context){
         }
     }
     fun dismissLogin(){loginGeneration++;qrOpen=false}
-    fun logout(){epoch++;loginGeneration++;playGeneration++;pendingMid=null;pendingToken=null;backStack.clear();secure.clear();session=JSONObject();profile=JSONObject();loggedIn=false;home=JSONObject();library=JSONObject();page="home";status=context.getString(R.string.logged_out);command("STOP")}
-    fun close(){alive=false;loginGeneration++;worker.shutdownNow();ui.removeCallbacksAndMessages(null)}
+    fun logout(){homeGeneration++;feedGeneration++;discoverySongs=emptyList();discoveryLoading=false;discoveryMore=true;discoveryError="";collectionBusy=false;collectionMessage="";epoch++;loginGeneration++;playGeneration++;pendingMid=null;pendingToken=null;backStack.clear();secure.clear();session=JSONObject();profile=JSONObject();loggedIn=false;home=JSONObject();library=JSONObject();page="home";status=context.getString(R.string.logged_out);command("STOP")}
+    fun close(){alive=false;loginGeneration++;worker.shutdownNow();feedWorker.shutdownNow();ui.removeCallbacksAndMessages(null)}
 }

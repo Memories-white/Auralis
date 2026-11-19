@@ -12,6 +12,7 @@ use std::{
 };
 
 const GATEWAY: &str = "https://u.y.qq.com/cgi-bin/musicu.fcg";
+mod discovery;
 const AGENT: &str = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36";
 
 #[cfg(any(target_os = "android", test))]
@@ -625,6 +626,8 @@ pub fn dispatch(command: &str, input: &str) -> String {
         match command {
             "profile" => profile(&v["session"]),
             "home" => home(&v["session"]),
+            "recommend" => discovery::recommend(&v),
+            "add_song" => discovery::add_song(&v["session"],v["dirid"].as_u64().unwrap_or(0),v["id"].as_u64().unwrap_or(0)),
             "library" => library(&v["session"]),
             "playlist" => playlist(
                 &v["session"],

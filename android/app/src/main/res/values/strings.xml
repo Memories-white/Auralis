@@ -156,4 +156,27 @@
     <string name="listen_now">现在就听</string>
     <string name="no_search_results">没有找到相关歌曲</string>
     <string name="try_search_again">试试其他歌名或歌手。</string>
+    <string name="retry">重试</string>
+    <string name="discovery_loading">正在发现适合你的音乐…</string>
+    <string name="discovery_end">暂时没有更多推荐，稍后刷新再来听</string>
+    <string name="discovery_scroll">继续向下探索</string>
+    <string name="back_to_top">返回顶部 ↑</string>
+    <string name="locate_playing">定位正在播放</string>
+    <string name="song_actions">歌曲选项</string>
+    <string name="add_to_likes">添加到我的喜欢</string>
+    <string name="already_liked">已在我的喜欢</string>
+    <string name="cloud_likes_summary">同步到 QQ 音乐账号</string>
+    <string name="add_to_playlist">添加到歌单</string>
+    <string name="owned_playlist_summary">选择你创建的 QQ 音乐歌单</string>
+    <string name="no_writable_playlists">还没有可添加的自建歌单，请先在 QQ 音乐创建歌单。</string>
+    <string name="adding_song">正在添加…</string>
+    <string name="song_added">已添加到 QQ 音乐</string>
+    <string name="song_already_present">已确认歌曲在该歌单中</string>
+    <string name="song_add_accepted">QQ 已受理请求，刷新歌单确认添加结果</string>
+    <string name="song_information">歌曲信息</string>
+    <string name="song_title">歌名</string>
+    <string name="song_artist">歌手 / 作者</string>
+    <string name="song_album">专辑</string>
+    <string name="song_duration">时长</string>
+    <string name="information_unavailable">暂无信息</string>
 </resources>

@@ -70,6 +70,9 @@ class MainActivity:ComponentActivity(){
         var queue by remember{mutableStateOf(false)}
         var qualityMenu by remember{mutableStateOf(false)}
         var confirmLogout by remember{mutableStateOf(false)}
+        var songActions by remember{mutableStateOf(false)}
+        var actionSong by remember{mutableStateOf<JSONObject?>(null)}
+        LaunchedEffect(m.mid){songActions=false}
         val lists=remember{mutableMapOf<String,LazyListState>()}
         BackHandler(player||m.page!="home"){if(player)player=false else m.back()}
         var playerOrigin by remember { mutableStateOf(Rect.Zero) }
@@ -80,7 +83,7 @@ class MainActivity:ComponentActivity(){
             if(player || expansion.value > 0f) {
                 val density=LocalDensity.current
                 val width=with(density){maxWidth.toPx()};val height=with(density){maxHeight.toPx()}
-                MusicPlayer(m,{player=false},{queue=true},{qualityMenu=true},Modifier.graphicsLayer {
+                MusicPlayer(m,{player=false},{queue=true},{qualityMenu=true},{actionSong=m.currentSong()?.let{JSONObject(it.toString())};songActions=true},Modifier.graphicsLayer {
                     val p=expansion.value.coerceIn(0f,1f)
                     val origin=playerOrigin.takeIf{it.width>0f}?:Rect(0f,height*0.85f,width,height)
                     transformOrigin=TransformOrigin(0f,0f)
@@ -92,6 +95,7 @@ class MainActivity:ComponentActivity(){
             }
         }
         Scaffold(Modifier.fillMaxSize(),containerColor=Color.Transparent,contentWindowInsets=WindowInsets(0,0,0,0)){
+            SongActions(m,actionSong,songActions,{songActions=false})
             OverlayDialog(show=m.qrOpen,title=stringResource(R.string.login_qq),summary=m.qrStatus,onDismissRequest=m::dismissLogin){
                 Column(Modifier.fillMaxWidth(),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(16.dp)){
                     m.qrBitmap?.let{Image(it.asImageBitmap(),stringResource(R.string.login_qr),Modifier.size(220.dp))}
@@ -113,6 +117,15 @@ class MainActivity:ComponentActivity(){
     val c=MiuixTheme.colorScheme
     val scroll=MiuixScrollBehavior()
     val list=states.getOrPut(m.page){LazyListState()}
+    val scope=rememberCoroutineScope()
+    val showTop by remember(list){derivedStateOf{list.firstVisibleItemIndex>=5}}
+    val currentTrackIndex=m.tracks.indexOfFirst{it.optString("mid")==m.mid}
+    LaunchedEffect(m.page,m.detailRevision){if(m.page=="songs")list.scrollToItem(0)}
+    LaunchedEffect(m.page,list){
+        if(m.page=="home")snapshotFlow{val info=list.layoutInfo;info.totalItemsCount>0&&(info.visibleItemsInfo.lastOrNull()?.index?:0)>=info.totalItemsCount-5}.collect{nearEnd->
+            if(nearEnd&&m.home.length()>0&&m.discoveryError.isBlank())m.loadMoreDiscovery()
+        }
+    }
     // Opaque semantic chrome is the conservative fallback while static capture and
     // continuous recording disagree on this device. Keep this separate from lyric blur.
     val title=when(m.page){"mine"->stringResource(R.string.my_music);"search"->stringResource(R.string.search);"songs"->m.detailTitle;else->if(m.page in SETTINGS_PAGES)stringResource(settingsTitle(m.page))else "Auralis"}
@@ -139,6 +152,7 @@ class MainActivity:ComponentActivity(){
             }
         }
     }}){padding->
+        Box(Modifier.fillMaxSize()){
         LazyColumn(state=list,modifier=Modifier.fillMaxSize()
             .nestedScroll(scroll.nestedScrollConnection).overScrollVertical(onOffsetChanged={scroll.state.overscrollOffset=it}).consumeWindowInsets(padding),
             contentPadding=PaddingValues(top=padding.calculateTopPadding(),bottom=padding.calculateBottomPadding()+20.dp)){
@@ -179,6 +193,13 @@ class MainActivity:ComponentActivity(){
                     itemsIndexed(m.tracks,key={i,s->"song:${s.optString("mid")}:$i"}){i,song->SongRow(song,playingSong(m,song)){m.play(m.tracks,i)}}
                 }
             }
+        }
+        if(m.page=="home"||m.page=="songs")Column(Modifier.align(Alignment.BottomEnd).padding(bottom=padding.calculateBottomPadding()+12.dp,end=20.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
+            if(m.page=="songs"&&currentTrackIndex>=0)TextButton(stringResource(R.string.locate_playing),{scope.launch{list.animateScrollToItem(currentTrackIndex+1+if(m.status.isNotBlank())1 else 0)}})
+            AnimatedVisibility(showTop,enter=fadeIn()+expandVertically(),exit=fadeOut()+shrinkVertically()){
+                TextButton(stringResource(R.string.back_to_top),{scope.launch{list.animateScrollToItem(0)}})
+            }
+        }
         }
     }
 }
@@ -269,13 +290,13 @@ internal fun playingSong(m:MusicState,song:JSONObject)=m.queue.getOrNull(PlayerS
         }
     }
 }
-@Composable private fun MusicPlayer(m:MusicState,close:()->Unit,queue:()->Unit,openQuality:()->Unit,modifier:Modifier){
+@Composable private fun MusicPlayer(m:MusicState,close:()->Unit,queue:()->Unit,openQuality:()->Unit,openActions:()->Unit,modifier:Modifier){
     val c=MiuixTheme.colorScheme
-    val pager=rememberPagerState(pageCount={2})
+    val pager=rememberPagerState(initialPage=1,pageCount={3})
     Scaffold(modifier.fillMaxSize(),containerColor=c.surface,
         topBar={SmallTopAppBar(modifier=Modifier.graphicsLayer{compositingStrategy=CompositingStrategy.Offscreen},title=stringResource(R.string.now_playing),navigationIcon={IconButton(onClick=close){TransportGlyph("down",stringResource(R.string.collapse_player))}},actions={IconButton(onClick=queue){Icon(MiuixIcons.Playlist,stringResource(R.string.play_queue),tint=c.onSurface)}})},
         bottomBar={Column(Modifier.fillMaxWidth().graphicsLayer{compositingStrategy=CompositingStrategy.Offscreen}.navigationBarsPadding().padding(horizontal=24.dp,vertical=10.dp)){
-            if(pager.currentPage==0)ThinSeekBar(m.position,m.duration,{m.command("SEEK","position",it)},Modifier.fillMaxWidth())
+            if(pager.currentPage!=2)ThinSeekBar(m.position,m.duration,{m.command("SEEK","position",it)},Modifier.fillMaxWidth())
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Text(formatTime(m.position),style=MiuixTheme.textStyles.footnote2,color=c.onSurfaceVariantSummary);Text(formatTime(m.duration),style=MiuixTheme.textStyles.footnote2,color=c.onSurfaceVariantSummary)}
             Row(Modifier.fillMaxWidth().padding(top=10.dp),horizontalArrangement=Arrangement.SpaceEvenly,verticalAlignment=Alignment.CenterVertically){
                 IconButton(onClick=m::cyclePlaybackMode,minWidth=48.dp,minHeight=48.dp){TransportGlyph(when(m.playbackMode){"SHUFFLE"->"shuffle";"LOOP"->"repeat";"SINGLE"->"repeat_one";else->"order"},stringResource(playbackLabel(m.playbackMode)),if(m.playbackMode=="ORDER")c.onSurface else c.primary)}
@@ -284,11 +305,11 @@ internal fun playingSong(m:MusicState,song:JSONObject)=m.queue.getOrNull(PlayerS
                 IconButton(onClick={m.command("NEXT")}){TransportGlyph("next",stringResource(R.string.next))}
                 IconButton(onClick=queue){Icon(MiuixIcons.Playlist,stringResource(R.string.play_queue))}
             }
-            if(pager.currentPage==1)ThinSeekBar(m.position,m.duration,{m.command("SEEK","position",it)},Modifier.fillMaxWidth(),framed=true)
+            if(pager.currentPage==2)ThinSeekBar(m.position,m.duration,{m.command("SEEK","position",it)},Modifier.fillMaxWidth(),framed=true)
         }}){padding->
         Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)){
             Row(Modifier.padding(horizontal=28.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)){
-                if(pager.currentPage==1)Artwork(m.cover,m.title,Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)))
+                if(pager.currentPage!=1)Artwork(m.cover,m.title,Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)))
                 Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)){
                     Text(m.title.ifBlank{stringResource(R.string.not_playing)},style=MiuixTheme.textStyles.title3,maxLines=1,overflow=TextOverflow.Ellipsis)
                     Text(m.artist,style=MiuixTheme.textStyles.footnote1,color=c.onSurfaceVariantSummary,maxLines=1,overflow=TextOverflow.Ellipsis)
@@ -298,8 +319,11 @@ internal fun playingSong(m:MusicState,song:JSONObject)=m.queue.getOrNull(PlayerS
             }
             if(m.status.isNotBlank())Text(m.status,Modifier.padding(horizontal=28.dp,vertical=8.dp),style=MiuixTheme.textStyles.footnote1,color=c.onSurfaceVariantSummary)
             HorizontalPager(pager,Modifier.weight(1f).fillMaxWidth()){page->
-                if(page==0)Box(Modifier.fillMaxSize().padding(28.dp),contentAlignment=Alignment.Center){Artwork(m.cover,m.title,Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(20.dp)))}
-                else SynchronizedLyrics(m,pager.currentPage==1)
+                when(page){
+                    0->SongInformation(m)
+                    1->Box(Modifier.fillMaxSize().padding(28.dp),contentAlignment=Alignment.Center){Artwork(m.cover,m.title,Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(20.dp)).clickable(onClickLabel=stringResource(R.string.song_actions),onClick=openActions))}
+                    else->SynchronizedLyrics(m,pager.currentPage==2)
+                }
             }
         }
     }

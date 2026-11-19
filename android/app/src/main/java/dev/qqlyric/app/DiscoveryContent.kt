@@ -26,7 +26,6 @@ fun LazyListScope.homeDiscovery(m:MusicState,showQueue:()->Unit){
     item("discovery-shortcuts"){
         val favorites=stringResource(R.string.local_favorites)
         LazyRow(contentPadding=PaddingValues(horizontal=12.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            item{TextButton(stringResource(R.string.daily_mix),m::daily)}
             item{TextButton(favorites,{m.openSongs(m.favorites,favorites)})}
             item{TextButton(stringResource(R.string.play_queue),showQueue)}
         }
@@ -45,19 +44,18 @@ fun LazyListScope.homeDiscovery(m:MusicState,showQueue:()->Unit){
         }
     }
     item("recommend-header"){SectionHeader(stringResource(R.string.recommended_songs),m::refreshHome)}
-    item("songs-shelf"){AlbumShelf(daily,false){_,i->m.play(daily,i)}}
+    item("songs-shelf"){if(m.discoverySongs.isNotEmpty())AlbumShelf(m.discoverySongs.take(6),false){_,i->m.play(m.discoverySongs,i)}else DiscoveryLoadState(m)}
     item("playlists-header"){SmallTitle(stringResource(R.string.recommended_playlists))}
     item("playlists-shelf"){AlbumShelf(m.recommendations(),true){s,_->m.playlist(s.optLong("id"),0,s.optString("title"))}}
-    if(daily.size>3){
-        item("more-music"){SmallTitle(stringResource(R.string.keep_discovering))}
-        itemsIndexed(daily.drop(3).take(5),key={i,s->"discovery:${s.optString("mid")}:$i"}){i,s->SongRow(s,playingSong(m,s)){m.play(daily,i+3)}}
-    }
+    item("more-music"){SmallTitle(stringResource(R.string.keep_discovering))}
+    itemsIndexed(m.discoverySongs.drop(6),key={i,s->"discovery:${s.optString("mid")}:$i"}){i,s->SongRow(s,playingSong(m,s)){m.play(m.discoverySongs,i+6)}}
+    item("discovery-load"){if(m.discoverySongs.isNotEmpty())DiscoveryLoadState(m)}
     if(!m.loggedIn)item("login-discovery"){EmptyMessage(stringResource(R.string.music_knows_you),stringResource(R.string.sync_qq_summary));TextButton(stringResource(R.string.login_qq),m::login,Modifier.padding(horizontal=12.dp).fillMaxWidth())}
 }
 
 fun LazyListScope.searchDiscovery(m:MusicState){
     val showResults=m.searchedQuery.isNotBlank()&&m.searchText.trim()==m.searchedQuery
-    val daily=m.home.optJSONArray("daily")?.objects().orEmpty()
+    val daily=m.discoverySongs
     item("search-input"){
         val keyboard=LocalSoftwareKeyboardController.current
         val focus=androidx.compose.ui.platform.LocalFocusManager.current
@@ -102,5 +100,12 @@ fun LazyListScope.searchDiscovery(m:MusicState){
         Box(Modifier.padding(horizontal=16.dp).heightIn(min=48.dp),contentAlignment=Alignment.CenterStart){
             Text(label,style=MiuixTheme.textStyles.body1,maxLines=1,overflow=TextOverflow.Ellipsis)
         }
+    }
+}
+
+@Composable internal fun DiscoveryLoadState(m:MusicState){
+    Column(Modifier.fillMaxWidth().padding(20.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(8.dp)){
+        Text(when{m.discoveryLoading->stringResource(R.string.discovery_loading);m.discoveryError.isNotBlank()->m.discoveryError;!m.loggedIn->stringResource(R.string.login_recommendations);!m.discoveryMore->stringResource(R.string.discovery_end);else->stringResource(R.string.discovery_scroll)},style=MiuixTheme.textStyles.footnote1,color=MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        if(m.discoveryError.isNotBlank())TextButton(stringResource(R.string.retry),m::loadMoreDiscovery)
     }
 }
