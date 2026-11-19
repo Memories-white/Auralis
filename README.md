@@ -4,11 +4,7 @@
 
 **用 Rust 连接音乐，用 MIUIX 呈现每一次聆听。**
 
-[![Version](https://img.shields.io/badge/version-0.3.4-3482FF?style=flat-square)](https://github.com/Memories-white/Auralis/releases/tag/v0.3.4)
-[![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](docs/BUILD.md)
-[![Architecture](https://img.shields.io/badge/ABI-arm64--v8a-64748B?style=flat-square)](docs/BUILD.md)
-[![UI](https://img.shields.io/badge/UI-MIUIX_0.9.5--beta01-3482FF?style=flat-square)](https://compose-miuix-ui.github.io/miuix/zh_CN/)
-[![License](https://img.shields.io/badge/license-MIT-64748B?style=flat-square)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.3.4-3482FF?style=flat-square)](https://github.com/Memories-white/Auralis/releases/tag/v0.3.4) [![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](docs/BUILD.md) [![Architecture](https://img.shields.io/badge/ABI-arm64--v8a-64748B?style=flat-square)](docs/BUILD.md) [![UI](https://img.shields.io/badge/UI-MIUIX_0.9.5--beta01-3482FF?style=flat-square)](https://compose-miuix-ui.github.io/miuix/zh_CN/) [![License](https://img.shields.io/badge/license-MIT-64748B?style=flat-square)](LICENSE)
 
 [下载安装](https://github.com/Memories-white/Auralis/releases/latest) · [使用指南](docs/USAGE.md) · [本地构建](docs/BUILD.md) · [更新日志](CHANGELOG.md) · [问题反馈](https://github.com/Memories-white/Auralis/issues)
 
