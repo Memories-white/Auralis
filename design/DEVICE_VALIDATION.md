@@ -1,3 +1,14 @@
+# v0.3.6 应用图标（2026-11-19）
+
+- Android assembleDebug 成功，资源检查确认 Manifest 的 application icon 指向自适应 ic_launcher，圆形入口及 Android 13+ monochrome 配置齐全。
+- 检查五档密度、普通 / 圆形共 10 张 PNG 的尺寸与 RGBA，所有图标 XML 及文档 SVG 语法通过；PNG 预览已目视检查。
+- Redmi K60 保留数据覆盖安装 0.3.6 / code 16，系统应用信息页已显示新 A 形播放图标，无裁切或默认 Android 占位图。已安装 APK 哈希与交付文件一致，16 KB zipalign 通过。
+- 媒体通知改用独立的透明单色图标；本次没有重复音源 / 收藏测试，也未逐项切换所有桌面遮罩、第三方桌面和主题图标配色。自适应 / 单色变体的配置检查与系统应用信息页实测属于不同验证范围。
+
+交付 `APKs/Auralis-v0.3.6-miuix-debug.apk`，17,141,481 bytes；SHA256 `D3672B1D5E0C2F47005ABA8FD06027ECCBEBC345FE45F220EEE30F915C2DB5BB`。
+
+---
+
 # v0.3.5 个性化发现与歌曲面板（2026-11-19）
 
 - 完整 Rust arm64 release + Android assembleDebug 通过；Rust 14 项测试及播放顺序、图片缓存、封面取色 Java 检查通过。新增检查覆盖只提取个性化歌曲货架、每日及已展示去重、缺失写入确认不得误判成功。

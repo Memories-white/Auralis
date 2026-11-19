@@ -4,7 +4,7 @@
 
 **用 Rust 连接音乐，用 MIUIX 呈现每一次聆听。**
 
-[![Version](https://img.shields.io/badge/version-0.3.5-3482FF?style=flat-square)](https://github.com/Memories-white/Auralis/releases/tag/v0.3.5) [![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](docs/BUILD.md) [![Architecture](https://img.shields.io/badge/ABI-arm64--v8a-64748B?style=flat-square)](docs/BUILD.md) [![UI](https://img.shields.io/badge/UI-MIUIX_0.9.5--beta01-3482FF?style=flat-square)](https://compose-miuix-ui.github.io/miuix/zh_CN/) [![License](https://img.shields.io/badge/license-MIT-64748B?style=flat-square)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.3.6-3482FF?style=flat-square)](https://github.com/Memories-white/Auralis/releases/tag/v0.3.6) [![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](docs/BUILD.md) [![Architecture](https://img.shields.io/badge/ABI-arm64--v8a-64748B?style=flat-square)](docs/BUILD.md) [![UI](https://img.shields.io/badge/UI-MIUIX_0.9.5--beta01-3482FF?style=flat-square)](https://compose-miuix-ui.github.io/miuix/zh_CN/) [![License](https://img.shields.io/badge/license-MIT-64748B?style=flat-square)](LICENSE)
 
 [下载安装](https://github.com/Memories-white/Auralis/releases/latest) · [使用指南](docs/USAGE.md) · [本地构建](docs/BUILD.md) · [更新日志](CHANGELOG.md) · [问题反馈](https://github.com/Memories-white/Auralis/issues)
 
@@ -14,7 +14,7 @@
 
 Auralis 是面向 Android 的音乐播放器，使用 **Rust** 实现 QQ 音乐协议与数据处理，使用 **Kotlin / Jetpack Compose** 构建原生界面。界面统一采用 **MIUIX**，支持明暗模式、莫奈取色、同步歌词和系统媒体控制。
 
-项目处于持续迭代阶段，当前版本为 **0.3.5**。需要 QQ 音乐账号及曲目对应的播放权益；本项目与腾讯、QQ 音乐没有隶属或官方合作关系。
+项目处于持续迭代阶段，当前版本为 **0.3.6**。需要 QQ 音乐账号及曲目对应的播放权益；本项目与腾讯、QQ 音乐没有隶属或官方合作关系。
 
 ## 界面一览
 
@@ -59,7 +59,11 @@ Auralis 是面向 Android 的音乐播放器，使用 **Rust** 实现 QQ 音乐�
 | **图片缓存** | WebP 磁盘缓存上限 24 MB / 240 项，内存上限 8 MiB，支持过期缓存离线回退 |
 | **系统歌词** | 通过 MediaSession 发布歌词，配合适配版 LyriconProvider 与兼容消费端使用 |
 
-### 0.3.5 新变化
+### 0.3.6 新变化
+
+新增 A 形播放标志，接入自适应桌面图标、圆形图标、单色主题图标及媒体通知标识。[查看图标设计与源文件](docs/ICON.md)。
+
+### 0.3.5 功能回顾
 
 - 移除顶部重复的每日 30 首入口，发现歌曲改用 QQ 个性化推荐流，持续向下加载，排除每日歌单和已展示歌曲。
 - 首页与歌单增加返回顶部，歌单可定位当前播放歌曲。
@@ -69,7 +73,7 @@ Auralis 是面向 Android 的音乐播放器，使用 **Rust** 实现 QQ 音乐�
 
 ## 安装与开始使用
 
-1. 前往 [Releases](https://github.com/Memories-white/Auralis/releases/latest) 下载 `Auralis-v0.3.5-miuix-debug.apk`。
+1. 前往 [Releases](https://github.com/Memories-white/Auralis/releases/latest) 下载 `Auralis-v0.3.6-miuix-debug.apk`。
 2. 使用 **Android 8.0+、arm64-v8a** 设备安装；按系统提示授权通知，以便使用后台媒体控制。
 3. 使用手机 QQ 扫码登录，进入首页刷新每日推荐，或打开搜索寻找歌曲。
 4. 点击底部歌曲信息打开完整播放器；向左滑动封面进入歌词页。

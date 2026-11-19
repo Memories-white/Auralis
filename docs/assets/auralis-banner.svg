@@ -8,7 +8,10 @@
   <rect width="1200" height="320" rx="28" fill="url(#bg)"/>
   <g stroke="#3482FF" opacity=".12" fill="none"><circle cx="1080" cy="120" r="180"/><circle cx="1080" cy="120" r="230"/><circle cx="1080" cy="120" r="280"/></g>
   <rect x="64" y="80" width="152" height="152" rx="44" fill="url(#accent)"/>
-  <g stroke="#FFF" stroke-width="9" stroke-linecap="round"><path d="M100 143v26m20-47v68m20-88v108m20-77v46m20-33v20"/></g>
+  <g transform="translate(64 80) scale(1.4074)">
+    <path d="M34,74 L48,38 C50.5,31.2 57.5,31.2 60,38 L74,74" fill="none" stroke="#FFF" stroke-width="8.4" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M49,50 C49,48.6 50.6,47.8 51.8,48.6 L60,55.1 C61.2,55.9 61.2,57.7 60,58.5 L51.8,65 C50.6,65.8 49,65 49,63.6 Z" fill="#FFF"/>
+  </g>
   <g font-family="Inter, Segoe UI, Arial, sans-serif">
     <text x="256" y="151" fill="#FFF" font-size="68" font-weight="600" letter-spacing="-2">Auralis</text>
     <text x="260" y="194" fill="#B6C6DF" font-size="23">Rust-powered music. Designed for Android.</text>

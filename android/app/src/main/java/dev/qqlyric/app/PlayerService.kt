@@ -251,7 +251,7 @@ class PlayerService : Service() {
         val action = if (playing) "PAUSE" else "RESUME"
         val control = PendingIntent.getService(this, 1, Intent(this, PlayerService::class.java).setAction(action),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        return Notification.Builder(this, "playback").setSmallIcon(android.R.drawable.ic_media_play)
+        return Notification.Builder(this, "playback").setSmallIcon(R.drawable.ic_stat_auralis)
             .setStyle(Notification.MediaStyle().setMediaSession(session.sessionToken).setShowActionsInCompactView(0,1,2))
             .setLargeIcon(artwork)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
