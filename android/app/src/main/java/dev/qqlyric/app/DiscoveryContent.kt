@@ -1,0 +1,106 @@
+package dev.qqlyric.app
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import top.yukonga.miuix.kmp.basic.*
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.*
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.PressFeedbackType
+
+/** Content only: the existing shell owns scroll, insets, navigation and the player. */
+fun LazyListScope.homeDiscovery(m:MusicState,showQueue:()->Unit){
+    val daily=m.home.optJSONArray("daily")?.objects().orEmpty()
+    item("discovery-shortcuts"){
+        val favorites=stringResource(R.string.local_favorites)
+        LazyRow(contentPadding=PaddingValues(horizontal=12.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+            item{TextButton(stringResource(R.string.daily_mix),m::daily)}
+            item{TextButton(favorites,{m.openSongs(m.favorites,favorites)})}
+            item{TextButton(stringResource(R.string.play_queue),showQueue)}
+        }
+    }
+    item("daily-feature"){
+        Card(Modifier.padding(horizontal=12.dp,vertical=12.dp).fillMaxWidth(),onClick=m::daily,pressFeedbackType=PressFeedbackType.Sink){
+            Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)){
+                Artwork(daily.firstOrNull()?.artwork().orEmpty(),stringResource(R.string.daily_cover),Modifier.size(72.dp).clip(RoundedCornerShape(12.dp)))
+                Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)){
+                    Text(stringResource(R.string.made_for_you),style=MiuixTheme.textStyles.footnote1,color=MiuixTheme.colorScheme.primary)
+                    Text(stringResource(R.string.daily_mix),style=MiuixTheme.textStyles.title3)
+                    Text(stringResource(if(m.loggedIn)R.string.daily_summary else R.string.daily_login_summary),style=MiuixTheme.textStyles.footnote2,color=MiuixTheme.colorScheme.onSurfaceVariantSummary,maxLines=2,overflow=TextOverflow.Ellipsis)
+                }
+                IconButton(onClick={if(daily.isEmpty())m.daily()else m.play(daily,0)},backgroundColor=MiuixTheme.colorScheme.primary,minWidth=48.dp,minHeight=48.dp){Icon(MiuixIcons.Play,stringResource(R.string.play_daily),tint=MiuixTheme.colorScheme.onPrimary)}
+            }
+        }
+    }
+    item("recommend-header"){SectionHeader(stringResource(R.string.recommended_songs),m::refreshHome)}
+    item("songs-shelf"){AlbumShelf(daily,false){_,i->m.play(daily,i)}}
+    item("playlists-header"){SmallTitle(stringResource(R.string.recommended_playlists))}
+    item("playlists-shelf"){AlbumShelf(m.recommendations(),true){s,_->m.playlist(s.optLong("id"),0,s.optString("title"))}}
+    if(daily.size>3){
+        item("more-music"){SmallTitle(stringResource(R.string.keep_discovering))}
+        itemsIndexed(daily.drop(3).take(5),key={i,s->"discovery:${s.optString("mid")}:$i"}){i,s->SongRow(s,playingSong(m,s)){m.play(daily,i+3)}}
+    }
+    if(!m.loggedIn)item("login-discovery"){EmptyMessage(stringResource(R.string.music_knows_you),stringResource(R.string.sync_qq_summary));TextButton(stringResource(R.string.login_qq),m::login,Modifier.padding(horizontal=12.dp).fillMaxWidth())}
+}
+
+fun LazyListScope.searchDiscovery(m:MusicState){
+    val showResults=m.searchedQuery.isNotBlank()&&m.searchText.trim()==m.searchedQuery
+    val daily=m.home.optJSONArray("daily")?.objects().orEmpty()
+    item("search-input"){
+        val keyboard=LocalSoftwareKeyboardController.current
+        val focus=androidx.compose.ui.platform.LocalFocusManager.current
+        val submit={keyboard?.hide();focus.clearFocus();m.search()}
+        TextField(value=m.searchText,onValueChange={m.searchText=it},label=stringResource(R.string.search_hint),useLabelAsPlaceholder=true,singleLine=true,
+            leadingIcon={Box(Modifier.padding(start=16.dp,end=8.dp),contentAlignment=Alignment.Center){Icon(MiuixIcons.Search,null,Modifier.size(22.dp))}},
+            trailingIcon={IconButton(onClick=submit,modifier=Modifier.padding(end=6.dp)){Icon(MiuixIcons.ChevronForward,stringResource(R.string.search))}},
+            modifier=Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=8.dp),
+            keyboardOptions=KeyboardOptions(imeAction=ImeAction.Search),keyboardActions=KeyboardActions(onSearch={submit()}))
+    }
+    if(showResults){
+        if(m.searchResults.isEmpty()&&!m.busy)item("search-no-results"){EmptyMessage(stringResource(R.string.no_search_results),stringResource(R.string.try_search_again))}
+        itemsIndexed(m.searchResults,key={i,s->"search:${s.optString("mid")}:$i"}){i,s->SongRow(s,playingSong(m,s)){m.play(m.searchResults,i)}}
+    }else{
+        if(m.searchHistory.isNotEmpty()){
+            item("history-header"){Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){Box(Modifier.weight(1f)){SmallTitle(stringResource(R.string.search_history))};TextButton(stringResource(R.string.clear_history),m::clearSearchHistory,Modifier.padding(end=12.dp))}}
+            item("history-chips"){LazyRow(contentPadding=PaddingValues(horizontal=12.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                items(m.searchHistory,key={it}){query->DiscoveryChip(query){m.searchText=query;m.search()}}
+            }}
+        }
+        val artists=daily.map{it.optString("artist")}.filter{it.isNotBlank()}.distinct().take(8)
+        if(artists.isNotEmpty()){
+            item("artists-header"){SmallTitle(stringResource(R.string.discover_artists))}
+            item("artists-chips"){LazyRow(contentPadding=PaddingValues(horizontal=12.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                items(artists,key={it}){artist->DiscoveryChip(artist){m.searchText=artist;m.search()}}
+            }}
+        }
+        item("search-recommend-header"){SectionHeader(stringResource(R.string.search_recommendations),m::refreshHome)}
+        if(daily.isNotEmpty()){
+            item("search-featured"){AlbumShelf(daily.take(6),false){_,i->m.play(daily,i)}}
+            item("search-list-header"){SmallTitle(stringResource(R.string.listen_now))}
+            itemsIndexed(daily.drop(6).take(6),key={i,s->"search-discover:${s.optString("mid")}:$i"}){i,s->SongRow(s,playingSong(m,s)){m.play(daily,i+6)}}
+        }else item("search-discovery-empty"){
+            EmptyMessage(stringResource(R.string.search_empty),stringResource(if(m.loggedIn)R.string.recommendation_empty_summary else R.string.sync_qq_summary))
+            TextButton(stringResource(if(m.loggedIn)R.string.refresh else R.string.login_qq),{if(m.loggedIn)m.refreshHome()else m.login()},Modifier.padding(horizontal=12.dp).fillMaxWidth())
+        }
+    }
+}
+
+@Composable private fun DiscoveryChip(label:String,onClick:()->Unit){
+    Card(Modifier.widthIn(max=180.dp).heightIn(min=48.dp),onClick=onClick,pressFeedbackType=PressFeedbackType.Sink){
+        Box(Modifier.padding(horizontal=16.dp).heightIn(min=48.dp),contentAlignment=Alignment.CenterStart){
+            Text(label,style=MiuixTheme.textStyles.body1,maxLines=1,overflow=TextOverflow.Ellipsis)
+        }
+    }
+}

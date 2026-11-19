@@ -1,0 +1,118 @@
+# v0.3.4 发现页和歌曲栏检查（2026-11-19）
+
+- 离线 assembleDebug 成功，保留数据覆盖安装至 Redmi K60，实际版本 0.3.4 / code 14；安装 base.apk 与交付 APK SHA256 一致，zipalign 16 KB 检查通过。
+- 首页与搜索页检查浅色及深色显示：快捷入口、每日精选、推荐书架和歌曲列表层次清晰；搜索图标有独立起始留白，长歌手名不再挤成两行。
+- 点击推荐歌手 Chris James，接口返回 30 首对应歌曲；重启后搜索历史保留，清空后历史区消失。搜索结果没有混入每日歌曲列表。
+- 搜索推荐 The Race 可直接播放；13 秒实机录屏检查歌曲栏自动展开与约 4.5 秒后收起，同一轨道随卡片移动，没有同时绘制第二条进度。收起后保留实际播放位置。
+- 展开后拖动轨道，再点击暂停，MediaSession 为 PAUSED / 87.837 秒，歌曲栏显示 01:27；点击歌曲信息仍可打开完整播放器并返回。
+- 二级页底栏已避开系统手势区，底栏背景阻挡列表透出；搜索页进入后 input_method 为 mInputShown=false，没有自动弹出输入法。crash buffer 本次为空。
+- 未重复 Rust 音源单元测试，未改音源、登录、音质或 Provider 协议。未做量化帧率测试及平板验证；录屏只验证实际设备的外观和交互。测试结束恢复跟随系统，保持暂停。
+
+交付 `APKs/Auralis-v0.3.4-miuix-debug.apk`，18,259,428 bytes；SHA256 `322BC326371FC45312D6623A370F8B9C3FCBB287E8FA5732C43CF2729C6B24CA`。
+
+---
+
+# v0.3.3 歌词和底栏检查（2026-11-19）
+
+- assembleDebug 离线构建成功，保留数据覆盖安装到 Redmi K60；实际版本 0.3.3 / code 13，已安装 base.apk 与交付文件 SHA256 一致。
+- 设置实机 UI 层级确认播放组仅保留音质，未出现播放顺序入口；全屏封面页模式按钮为纯图标。
+- The Race 27–38 秒录屏检查：歌词连续跟随，当前句清晰并放大，邻近行渐进散焦；英文长句自动换行，两侧未出现裁字。截图及录屏对照，避免系统静态截图偶发遗漏固定文字造成误判。
+- 歌词页底部边框进度可见，暂停点击后 MediaSession 跳至 94.523 秒；返回首页等待歌曲栏收起后，进度仍显示在约 67% 位置。
+- 本次只修改 Compose 显示，未改变 Rust 音源、音质权限与 MediaSession 歌词字段。没有重复此前的音源后端测试。测试结束保持暂停。
+
+交付 `APKs/Auralis-v0.3.3-miuix-debug.apk`，16,943,185 bytes；SHA256 `F8F718FC272AE1F59A7C2862EBB17575BD07958CD621D4E13FCDBCC6B48E716C`。
+
+---
+
+# v0.3.2 音质选择检查（2026-11-19）
+
+- Rust 共 11 项离线单元测试通过；新增响应选择检查覆盖自动优先 SQ、明确 HQ/标准不反向升级、拒绝后按开关降级、关闭降级时拒绝、无音源及登录失效。
+- arm64 Rust release 与 Android assembleDebug 通过，实际安装 versionCode 12 / versionName 0.3.2，保留账号数据。
+- QQ 真实歌曲 The Race：自动获取 SQ；暂停并拖到 44.813 秒后改 HQ，仍为 PAUSED 且位置 44.813 秒；标准音质选择后界面确认“当前实际音质：标准音质”，暂停位置保持 48.189 秒。
+- 播放中请求 SQ 后 MediaSession 仍为 PLAYING，位置为 50.456 秒，没有回到开头；下一首 MONTAGEM QUEBRADA 确认 SQ 标记，说明下一首继承了音质偏好。
+- 关闭回退的拒绝场景通过真实选择器的响应夹具验证，未通过篡改真实账号或制造权限失效来测试。所显示音质依据 QQ 返回的 VKey 档位；不把系统解码器能力列表当成当前音源的解码信息。
+- 播放页提供实际音质按钮及弹层，设置的播放组增加音质子页；偏好保存，自动模式为默认。音源切换不改变歌曲身份、队列或已有歌词/翻译字段。
+- 最终 APK zipalign 16 KB 校验通过；Rust 与 androidx.graphics.path 两个原生库 ELF LOAD 均满足 16 KB 对齐。
+
+交付包 `APKs/Auralis-v0.3.2-miuix-debug.apk`，17,212,734 bytes。SHA256 `61C3C938406D7C0CD858BC982F1C7FED7198B3CAE38D54D22A8D1BD9FBAF489B`。
+
+---
+
+# v0.3.1 实机检查（2026-11-19）
+
+- assembleDebug 离线构建通过，versionCode 11 / versionName 0.3.1。保留数据覆盖安装，手机安装包 SHA256 与交付包相同。
+- 首页搜索位于头像左侧；底部仅首页、我的。搜索页输入框初始不聚焦；推荐歌单不再重复每日 30 首。
+- 设置分组、子页、返回栈、无底部播放器布局已实机检查。莫奈开关、壁纸配色、自定义色及全部 10 种色板逐个切换；2025 规范与封面主色也已检查。没有调用壁纸读取权限或向接口上传取色数据。
+- 真实 The Race 封面页确认细轨与小滑块；歌词页确认最底部边框进度，保留 48dp 拖动区域。拖动进度可实际定位。
+- 独立 JVM 检查通过：PlaybackOrder 的顺序末尾停止、列表循环、单曲循环、随机遍历和历史前后；ArtworkSeed 的透明/空图回退和主色；原图片磁盘缓存的时效、LRU 和容量。
+- 实机单曲循环在末尾重新回到 0；随机下一首从 The Race 切至 Revolve，再点上一首回到 The Race。
+- 快速连续点击 The Race 与 MONTAGEM QUEBRADA，实际 MediaSession 最终为后者；再次选择 The Race 时从新请求的 0 位置开始，未沿用前一个会话的播放位置。过程有录屏记录。
+- 新歌词组件连续录屏检查 21–33 秒切句：逐行错峰跟随、当前句缩放与回落、渐进模糊；手动拖动后恢复到中线略上的当前句。暂停后位置与播放状态冻结。未宣称 Apple Music 的私有参数或逐字时间轴。
+- APK zipalign 16 KB 检查通过。新源码未改 Rust 音乐协议，未为此次 UI 变化重复运行所有 Rust 测试。
+- LyriconProvider 4 项回归测试通过；补选作用域并经用户允许重启后，系统超级岛在 Lyricon 来源下完成原文、翻译、暂停、seek、切歌实测。详见 `LYRICON_VALIDATION.md`，与播放器自身歌词动效区分验证。
+
+交付包：`APKs/Auralis-v0.3.1-miuix-debug.apk`，17,175,830 bytes。SHA256 `A21D70A7A6E85B40A2A26F6B37D381098A3795A2CCEF6E63634280E9FABFD15B`。
+
+未覆盖：Android 12 以下、横屏和平板完整布局、真实读屏、大字号、每一种色板的壁纸更换，以及帧率/功耗测量。历史静态 screencap 偶发漏图问题仍不能据连续录屏正常而宣称在所有设备消失。
+
+---
+
+# v0.3.0 · MIUIX 实机检查（2026-11-19）
+
+## 已检查
+
+- Compose + MIUIX ui / preference / icons 0.9.5-beta01 编译和 assembleDebug 通过。Kotlin 2.4.21；实际解析 Android Compose UI 1.12.1（JetBrains 包 1.12.2）；compileSdk 37.2。
+- USB 保留数据覆盖安装，设备读取 versionCode 10 / versionName 0.3.0。已有 QQ 登录保留；真实头像、昵称、喜欢、歌单和封面可加载。没有退出账户重新扫码，因此不把旧登录保留等同于本版全新登录验证。
+- 搜索数字关键词 1979，接口返回 30 首；歌曲行与歌手信息可见。自建歌单打开为 100 首详情，系统返回可以回到来源页面。
+- 浅色、跟随系统和深色渲染检查，分组卡片全宽；最后恢复跟随系统。首页、我的、搜索、设置使用统一 MIUIX，未提供 Material/Apple 风格切换入口。
+- 真实歌曲 The Race 播放、暂停、封面与歌词滑动。35 秒连续录屏检查展开/收起、歌词拖动和恢复跟随，控制栏完整可见。修正了 LazyColumn beforeContentPadding 被重复计入演唱锚点的问题。
+- 当前句清晰放大，其他行按距离模糊，上下渐隐；拖动结束约 1.8 秒恢复定位。动画使用 Compose spring，未宣称系统私有动画的逐帧还原。
+- 通知点击目标已迁移到 MainActivity 的 open_player 请求，旧 LyricsActivity 已移出 Manifest。退出登录仍位于设置末尾，不在此次检查中实际退出账号。
+- ArtworkDiskStore 独立 JVM 检查通过：读写、时效、过期回退、LRU、大小限制与键校验。
+- APK zipalign 16 KB 检查通过，Rust 和 androidx.graphics.path 两个 so 的 ELF LOAD 均至少 16384 对齐。当前手机不代表 16 KB 页大小系统的运行验证。
+- crash buffer 中只有前一天旧版堆栈，没有此次检查对应的新崩溃。
+
+## 验证边界
+
+静态 screencap 偶尔缺少部分固定图标或文字，连续 screenrecord 能显示完整控件，尚未确定是捕获还是绘制链路差异。播放页底部控件增加独立合成边界；顶栏使用不透明 semantic surface 回退，暂不提供背景实时模糊。没有据此宣称所有设备均无绘制问题。
+
+尚未检查：全新扫码授权、Android 12 以下模糊回退、完整宽屏/横屏布局、读屏与大字体、LyriconProvider/System UI 消费端、帧率和功耗。保持真实账户登录，结束时音乐暂停。
+
+以下为旧版历史检查，不代表当前 Compose 实现。
+
+---
+
+# v0.2.3 设备验证
+
+## v0.2.4 补充（2026-11-18）
+
+- 保留数据覆盖安装 v0.2.4（versionCode 8）。MIUIX 深色真实歌曲歌词中，当前句较相邻句放大 12.5%，不使用模糊；其他行按距离逐步模糊、淡化，上下边缘渐隐。连续截图观察到不同当前句在相同演唱位置清晰显示。
+- 修正内容留白归属后，当前句位于歌词视口约三分之一处，不再被上沿渐隐遮挡。长句放大使用预留空间，不逐帧改变字体测量。
+- 暂停后拖动歌词，600ms 截图显示浏览歌词清晰；约 3 秒后恢复到原当前句并重新渐进模糊。触摸观察放在 Activity 分发边界，避免可点击歌词子项拦截 DOWN 导致浏览状态丢失。
+- MD3 浅色歌词页截图检查通过；MIUIX、MD3、Apple 设置页可切换且无新增崩溃。最后恢复 MIUIX、跟随系统，音乐保持暂停。
+- Android assembleDebug、既有歌词跟随回归检查通过；APK zipalign 16 KB 检查通过。浏览器样例令牌 lint 三种风格均为 0 error / 0 warn，但浏览器样例不证明本版原生歌词动效。
+- 未在 Android 12 以下设备、读屏开启或系统关闭动画情况下实机验证；相应回退有平台版本和系统状态分支。没有测量帧率或 GPU 成本，不作性能保证。
+- 实现参考：[RenderEffect](https://developer.android.com/reference/android/graphics/RenderEffect)、[ValueAnimator](https://developer.android.com/reference/android/animation/ValueAnimator)。
+
+2026-11-18，通过用户授权的 USB ADB 在用户手机上保留数据覆盖安装。
+
+## 已观察
+
+- 旧版 MD3 崩溃日志为 TextInputLayout 测量时将 ViewGroup.LayoutParams 转为 LinearLayout.LayoutParams 失败。修正后多次 MD3 冷启动与页面切换未再发生该异常。
+- Material3 明暗页面、搜索框、底部导航已检查真实截图。根布局和 BottomNavigationView 重复处理系统栏 Insets 会压缩导航标签；移除导航的重复 Insets 后三个中文标签完整显示。
+- MIUIX、Apple、Material3 设置切换正常；最后恢复 Material3、跟随系统。
+- 既有登录状态保留，右上角用户头像加载成功。没有退出或重新扫码，不能将本次结果当作新登录流程回归。
+- QQ 推荐数据与封面加载成功；所选歌曲取得 SQ 地址，MediaSession 进入 PLAYING。播放底栏展开截图及约 5 秒后的紧凑截图均已检查，按钮无重叠。
+- 从歌曲信息栏进入播放页，左滑显示歌词与翻译。暂停后手动拖动歌词，约 3 秒后截图恢复当前句，确认恢复不依赖下一句到来。
+
+## 构建与边界
+
+- assembleDebug 成功；Rust 库 LOAD 段对齐为 0x4000，APK zipalign -c -P 16 检查通过。链接配置位于项目 .cargo/config.toml，依据 Android 官方 16 KB 页大小兼容指南。
+- 手机实际 PAGE_SIZE 为 4096；没有在 16 KB 页大小系统上运行测试。
+- 手机收到通话时音乐被暂停；没有在通话中继续发起播放。未将这次观察当作耳机、蓝牙、锁屏通知的完整回归。
+- 没有验证所有歌曲、会员权益、下载及全部主题的所有页面。MIUIX 与 Apple 仍为 Android View 风格映射。
+- 原始截图与 UI dump 保存在已忽略的 device-debug/ 中，可能包含用户资料，不随代码公开分发。
+
+官方参考：https://developer.android.com/guide/practices/page-sizes
+
+最终包复核：`APKs/Auralis-v0.3.0-miuix-debug.apk`，18,044,816 bytes，SHA256 `06FA5F59D744DF4BD272AE445F2C81567317CE7A47DA188EE70998326DD36106`。从手机安装目录回读 base.apk 后哈希完全一致。最终包的 open_player Intent 可进入新播放页，底部队列按钮可打开 30 首歌曲的 MIUIX OverlayBottomSheet；MediaSession 确认 PAUSED 后返回首页。开始播放后的底栏展开也在补充录屏中观察到。

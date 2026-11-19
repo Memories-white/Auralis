@@ -1,0 +1,311 @@
+package dev.qqlyric.app
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.*
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.pager.*
+import androidx.compose.foundation.shape.*
+import androidx.compose.foundation.text.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.*
+import androidx.compose.ui.draw.*
+import androidx.compose.ui.graphics.*
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.*
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.*
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.*
+import androidx.core.view.WindowCompat
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
+import org.json.JSONObject
+import top.yukonga.miuix.kmp.basic.*
+import top.yukonga.miuix.kmp.theme.*
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.*
+import top.yukonga.miuix.kmp.overlay.*
+import top.yukonga.miuix.kmp.preference.*
+import top.yukonga.miuix.kmp.utils.PressFeedbackType
+import top.yukonga.miuix.kmp.utils.overScrollVertical
+
+class MainActivity:ComponentActivity(){
+    private lateinit var music:MusicState
+    private var openRequested by mutableStateOf(false)
+    override fun onCreate(savedInstanceState:Bundle?){
+        super.onCreate(savedInstanceState);enableEdgeToEdge();music=MusicState(this)
+        openRequested=intent.getBooleanExtra("open_player",false)
+        setContent{Auralis(music,openRequested){openRequested=false}}
+    }
+    override fun onNewIntent(intent:android.content.Intent){super.onNewIntent(intent);setIntent(intent);openRequested=intent.getBooleanExtra("open_player",false)}
+    override fun onDestroy(){music.close();super.onDestroy()}
+}
+
+@Composable private fun Auralis(m:MusicState,openRequested:Boolean,onOpenHandled:()->Unit){
+    val theme=rememberMusicTheme(m)
+    MiuixTheme(controller=theme){
+        val c=MiuixTheme.colorScheme
+        val activity=LocalContext.current as MainActivity
+        val dark=when(m.colorMode){"light"->false;"dark"->true;else->isSystemInDarkTheme()}
+        SideEffect{WindowCompat.getInsetsController(activity.window,activity.window.decorView).apply{isAppearanceLightStatusBars=!dark;isAppearanceLightNavigationBars=!dark}}
+        val lifecycle=androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+        LaunchedEffect(m,lifecycle){lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED){while(isActive){m.sample();delay(if(m.playing)32 else 180)}}}
+        var player by rememberSaveable{mutableStateOf(false)}
+        LaunchedEffect(openRequested){if(openRequested){player=true;onOpenHandled()}}
+        var queue by remember{mutableStateOf(false)}
+        var qualityMenu by remember{mutableStateOf(false)}
+        var confirmLogout by remember{mutableStateOf(false)}
+        val lists=remember{mutableMapOf<String,LazyListState>()}
+        BackHandler(player||m.page!="home"){if(player)player=false else m.back()}
+        var playerOrigin by remember { mutableStateOf(Rect.Zero) }
+        val expansion = remember { Animatable(0f) }
+        LaunchedEffect(player) { expansion.animateTo(if (player) 1f else 0f, spring(dampingRatio=0.86f, stiffness=420f)) }
+        BoxWithConstraints(Modifier.fillMaxSize().background(c.surface)) {
+            MusicShell(m,lists,Modifier.onGloballyPositioned { playerOrigin=it.boundsInRoot() },{player=true},{queue=true},{confirmLogout=true})
+            if(player || expansion.value > 0f) {
+                val density=LocalDensity.current
+                val width=with(density){maxWidth.toPx()};val height=with(density){maxHeight.toPx()}
+                MusicPlayer(m,{player=false},{queue=true},{qualityMenu=true},Modifier.graphicsLayer {
+                    val p=expansion.value.coerceIn(0f,1f)
+                    val origin=playerOrigin.takeIf{it.width>0f}?:Rect(0f,height*0.85f,width,height)
+                    transformOrigin=TransformOrigin(0f,0f)
+                    translationX=origin.left*(1-p);translationY=origin.top*(1-p)
+                    scaleX=origin.width/width+(1-origin.width/width)*p
+                    scaleY=origin.height/height+(1-origin.height/height)*p
+                    alpha=p;clip=true;shape=RoundedCornerShape(16.dp*(1-p))
+                })
+            }
+        }
+        Scaffold(Modifier.fillMaxSize(),containerColor=Color.Transparent,contentWindowInsets=WindowInsets(0,0,0,0)){
+            OverlayDialog(show=m.qrOpen,title=stringResource(R.string.login_qq),summary=m.qrStatus,onDismissRequest=m::dismissLogin){
+                Column(Modifier.fillMaxWidth(),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(16.dp)){
+                    m.qrBitmap?.let{Image(it.asImageBitmap(),stringResource(R.string.login_qr),Modifier.size(220.dp))}
+                    Row(horizontalArrangement=Arrangement.spacedBy(12.dp)){TextButton(stringResource(R.string.get_qr_again),m::login);TextButton(stringResource(R.string.cancel),m::dismissLogin)}
+                }
+            }
+            OverlayDialog(show=confirmLogout,title=stringResource(R.string.logout_title),summary=stringResource(R.string.logout_summary),onDismissRequest={confirmLogout=false}){
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(12.dp)){TextButton(stringResource(R.string.cancel),{confirmLogout=false},Modifier.weight(1f));TextButton(stringResource(R.string.logout),{confirmLogout=false;m.logout()},Modifier.weight(1f))}
+            }
+            OverlayDialog(show=qualityMenu,title=stringResource(R.string.audio_quality),onDismissRequest={qualityMenu=false}){Column(Modifier.fillMaxWidth().heightIn(max=500.dp).verticalScroll(rememberScrollState())){QualityChoices(m)}}
+            OverlayBottomSheet(show=queue,title=stringResource(R.string.play_queue_count,m.queue.size),onDismissRequest={queue=false}){
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max=480.dp)){itemsIndexed(m.queue){index,song->SongRow(song,index==PlayerService.currentIndex){queue=false;m.play(m.queue,index)}}}
+            }
+        }
+    }
+}
+
+@Composable private fun MusicShell(m:MusicState,states:MutableMap<String,LazyListState>,playerSurface:Modifier,openPlayer:()->Unit,showQueue:()->Unit,logout:()->Unit){
+    val c=MiuixTheme.colorScheme
+    val scroll=MiuixScrollBehavior()
+    val list=states.getOrPut(m.page){LazyListState()}
+    // Opaque semantic chrome is the conservative fallback while static capture and
+    // continuous recording disagree on this device. Keep this separate from lyric blur.
+    val title=when(m.page){"mine"->stringResource(R.string.my_music);"search"->stringResource(R.string.search);"songs"->m.detailTitle;else->if(m.page in SETTINGS_PAGES)stringResource(settingsTitle(m.page))else "Auralis"}
+    val secondary=m.page!="home"&&m.page!="mine"
+    val likedLabel=stringResource(R.string.liked_music)
+    val favoritesLabel=stringResource(R.string.local_favorites)
+    Scaffold(containerColor=c.surface,topBar={
+        Box(Modifier.background(c.surface)){
+            TopAppBar(title=title,expandable=LocalConfiguration.current.screenWidthDp<840,color=Color.Transparent,scrollBehavior=scroll,
+                navigationIcon={if(secondary)IconButton(onClick=m::back){Icon(MiuixIcons.Back,stringResource(R.string.back))}},
+                actions={
+                    if(m.page=="home"||m.page=="mine")IconButton(onClick={m.navigate("search")}){Icon(MiuixIcons.Search,stringResource(R.string.search),tint=c.onSurface)}
+                    if(m.page=="mine")IconButton(onClick={m.navigate("settings")}){Icon(MiuixIcons.Settings,stringResource(R.string.settings))}
+                    if(m.page=="home"||m.page=="mine")IconButton(onClick={if(m.loggedIn)m.navigate("mine")else m.login()}){
+                        if(m.loggedIn)Artwork(m.avatar,stringResource(R.string.my_account),Modifier.size(32.dp).clip(CircleShape),true)else Icon(MiuixIcons.Contacts,stringResource(R.string.login))
+                    }
+                })
+        }
+    },bottomBar={if(m.page !in SETTINGS_PAGES)Column(Modifier.background(c.surface).then(if(secondary)Modifier.navigationBarsPadding()else Modifier).graphicsLayer{compositingStrategy=CompositingStrategy.Offscreen}){
+        MiniPlayer(m,playerSurface.padding(horizontal=12.dp,vertical=6.dp),openPlayer,showQueue)
+        if(m.page=="home"||m.page=="mine")NavigationBar{
+            listOf(Triple("home",stringResource(R.string.home),MiuixIcons.Home),Triple("mine",stringResource(R.string.mine),MiuixIcons.Contacts)).forEach{(page,label,icon)->
+                NavigationBarItem(selected=(if(m.page=="settings")"mine"else if(m.page=="songs")m.parentPage else m.page)==page,onClick={m.navigate(page)},icon=icon,label=label)
+            }
+        }
+    }}){padding->
+        LazyColumn(state=list,modifier=Modifier.fillMaxSize()
+            .nestedScroll(scroll.nestedScrollConnection).overScrollVertical(onOffsetChanged={scroll.state.overscrollOffset=it}).consumeWindowInsets(padding),
+            contentPadding=PaddingValues(top=padding.calculateTopPadding(),bottom=padding.calculateBottomPadding()+20.dp)){
+            if(m.status.isNotBlank())item("status"){Text(m.status,Modifier.padding(horizontal=28.dp,vertical=12.dp),color=c.onBackgroundVariant,style=MiuixTheme.textStyles.footnote1)}
+            if(m.page in SETTINGS_PAGES)settingsContent(m,logout)
+            when(m.page){
+                "home"->homeDiscovery(m,showQueue)
+                "search"->searchDiscovery(m)
+                "mine"->{
+                    item("profile"){Card(Modifier.padding(horizontal=12.dp,vertical=8.dp).fillMaxWidth()){
+                        Row(Modifier.padding(20.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(16.dp)){
+                            Artwork(m.avatar,stringResource(R.string.avatar),Modifier.size(64.dp).clip(CircleShape),true)
+                            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)){
+                                Text(if(m.loggedIn)m.profile.optString("nickname").takeIf{it.isNotBlank()&&it!="null"}?:stringResource(R.string.qq_user)else stringResource(R.string.music_with_you),style=MiuixTheme.textStyles.title3)
+                                Text(if(m.loggedIn)"QQ ${m.uin}"else stringResource(R.string.login_library_summary),style=MiuixTheme.textStyles.footnote1,color=c.onSurfaceVariantSummary)
+                            }
+                        }
+                    }}
+                    item("collections"){SmallTitle(stringResource(R.string.collections));Card(Modifier.padding(horizontal=12.dp).fillMaxWidth()){
+                        ArrowPreference(title=stringResource(R.string.liked_music),summary=stringResource(R.string.song_count,m.library.optJSONArray("likes")?.length()?:0),startAction={Icon(MiuixIcons.Favorites,null)},onClick={if(m.loggedIn)m.openSongs(m.library.optJSONArray("likes")?.objects().orEmpty(),likedLabel)else m.login()})
+                        ArrowPreference(title=stringResource(R.string.local_favorites),summary=stringResource(R.string.song_count,m.favorites.size),startAction={Icon(MiuixIcons.Music,null)},onClick={m.openSongs(m.favorites,favoritesLabel)})
+                    }}
+                    item("my-playlists-header"){SectionHeader(stringResource(R.string.my_playlists),m::refreshLibrary)}
+                    if(!m.loggedIn)item("mine-login"){TextButton(stringResource(R.string.login_qq),m::login,Modifier.padding(12.dp).fillMaxWidth())}
+                    itemsIndexed(m.library.optJSONArray("playlists")?.objects().orEmpty(),key={i,s->"playlist:${s.optLong("id")}:$i"}){_,song->
+                        Card(Modifier.padding(horizontal=12.dp,vertical=4.dp).fillMaxWidth(),onClick={m.playlist(song.optLong("id"),song.optLong("dirid"),song.optString("title"))},pressFeedbackType=PressFeedbackType.Sink){
+                            Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)){
+                                Artwork(song.optString("cover"),song.optString("title"),Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)))
+                                Column(Modifier.weight(1f)){Text(song.optString("title"),maxLines=1,overflow=TextOverflow.Ellipsis);Text(stringResource(R.string.song_count,song.optInt("count")),style=MiuixTheme.textStyles.footnote1,color=c.onSurfaceVariantSummary)}
+                                Icon(MiuixIcons.ChevronForward,null)
+                            }
+                        }
+                    }
+                }
+                "songs"->{
+                    item("playlist-count"){SmallTitle(stringResource(R.string.playlist_count,m.tracks.size));TextButton(stringResource(R.string.play_all),{m.play(m.tracks,0)},Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=8.dp),enabled=m.tracks.isNotEmpty())}
+                    if(m.tracks.isEmpty())item("songs-empty"){EmptyMessage(stringResource(R.string.no_songs),stringResource(R.string.retry_later))}
+                    itemsIndexed(m.tracks,key={i,s->"song:${s.optString("mid")}:$i"}){i,song->SongRow(song,playingSong(m,song)){m.play(m.tracks,i)}}
+                }
+            }
+        }
+    }
+}
+
+@Composable internal fun SectionHeader(title:String,refresh:()->Unit){Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){Box(Modifier.weight(1f)){SmallTitle(title)};IconButton(onClick=refresh,modifier=Modifier.padding(end=12.dp)){Icon(MiuixIcons.Refresh,stringResource(R.string.refresh))}}}
+@Composable internal fun EmptyMessage(title:String,summary:String){Column(Modifier.fillMaxWidth().padding(28.dp,40.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text(title,style=MiuixTheme.textStyles.title3);Text(summary,color=MiuixTheme.colorScheme.onSurfaceVariantSummary)}}
+internal fun playingSong(m:MusicState,song:JSONObject)=m.queue.getOrNull(PlayerService.currentIndex)?.optString("mid")==song.optString("mid")
+
+@Composable internal fun Artwork(url:String,label:String,modifier:Modifier=Modifier,avatar:Boolean=false){
+    val context=LocalContext.current
+    val bitmap by produceState(ArtworkCache.peek(url,avatar),url,avatar){value=withContext(Dispatchers.IO){ArtworkCache.load(context,url,avatar)}}
+    Box(modifier.background(MiuixTheme.colorScheme.surfaceContainer),contentAlignment=Alignment.Center){
+        if(bitmap!=null)Image(bitmap!!.asImageBitmap(),label,Modifier.fillMaxSize(),contentScale=androidx.compose.ui.layout.ContentScale.Crop)
+        else Icon(if(avatar)MiuixIcons.Contacts else MiuixIcons.Music,label,Modifier.size(28.dp),tint=MiuixTheme.colorScheme.onSurfaceVariantSummary)
+    }
+}
+@Composable internal fun AlbumShelf(songs:List<JSONObject>,playlists:Boolean,onClick:(JSONObject,Int)->Unit){
+    if(songs.isEmpty()){EmptyMessage(stringResource(R.string.recommendation_empty),stringResource(R.string.recommendation_empty_summary));return}
+    LazyRow(contentPadding=PaddingValues(horizontal=12.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)){
+        itemsIndexed(songs.take(12),key={i,s->"${s.optString("mid",s.optString("id"))}:$i"}){i,song->
+            Card(Modifier.width(144.dp),onClick={onClick(song,i)},pressFeedbackType=PressFeedbackType.Sink){
+                Box(Modifier.fillMaxWidth().padding(10.dp)){
+                    Artwork(if(playlists)song.optString("cover")else song.artwork(),song.optString("title"),Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(10.dp)))
+                    if(!playlists)Box(Modifier.align(Alignment.BottomEnd).padding(8.dp).size(28.dp).clip(CircleShape).background(MiuixTheme.colorScheme.primary),contentAlignment=Alignment.Center){Icon(MiuixIcons.Play,null,Modifier.size(16.dp),tint=MiuixTheme.colorScheme.onPrimary)}
+                }
+                Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(4.dp)){
+                    Text(song.optString("title"),style=MiuixTheme.textStyles.body1,maxLines=1,overflow=TextOverflow.Ellipsis)
+                    Text(if(playlists)stringResource(R.string.curated_playlist)else song.optString("artist"),style=MiuixTheme.textStyles.footnote1,color=MiuixTheme.colorScheme.onSurfaceVariantSummary,maxLines=1,overflow=TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+@Composable internal fun SongRow(song:JSONObject,selected:Boolean,onClick:()->Unit){
+    Card(Modifier.padding(horizontal=12.dp,vertical=4.dp).fillMaxWidth(),onClick=onClick,pressFeedbackType=PressFeedbackType.Sink){
+        Row(Modifier.padding(12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)){
+            Artwork(song.artwork(),song.optString("title"),Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)))
+            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)){
+                Text(song.optString("title"),color=if(selected)MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,maxLines=1,overflow=TextOverflow.Ellipsis)
+                Text(song.optString("artist"),style=MiuixTheme.textStyles.footnote1,color=MiuixTheme.colorScheme.onSurfaceVariantSummary,maxLines=1,overflow=TextOverflow.Ellipsis)
+            }
+            if(song.optBoolean("vip"))Text("VIP",style=MiuixTheme.textStyles.footnote2,color=MiuixTheme.colorScheme.primary)
+        }
+    }
+}
+@Composable private fun MiniPlayer(m:MusicState,modifier:Modifier,open:()->Unit,queue:()->Unit){
+    var expanded by remember { mutableStateOf(false) }
+    var scrubbing by remember { mutableStateOf(false) }
+    var interaction by remember { mutableIntStateOf(0) }
+    LaunchedEffect(m.mid,m.playing,scrubbing,interaction) {
+        if(scrubbing){expanded=true;return@LaunchedEffect}
+        if(m.playing||expanded){expanded=true;delay(4500)}
+        expanded=false
+    }
+    val progress by animateFloatAsState(if(expanded)1f else 0f,spring(dampingRatio=0.88f,stiffness=320f),label="song bar expansion")
+    val p=progress.coerceIn(0f,1f)
+    val c=MiuixTheme.colorScheme
+    val transport:(String)->Unit={action->interaction++;m.command(action)}
+    Card(modifier.fillMaxWidth(),onClick=open,pressFeedbackType=PressFeedbackType.Sink){
+        Box(Modifier.fillMaxWidth().height((80f+120f*p).dp)){
+            Row(Modifier.fillMaxWidth().height((68f+16f*p).dp).padding(horizontal=12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)){
+                Artwork(m.cover,m.title,Modifier.size((44f+12f*p).dp).clip(RoundedCornerShape(10.dp)))
+                Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)){
+                    Text(m.title.ifBlank{stringResource(R.string.select_song)},style=MiuixTheme.textStyles.body1,maxLines=1,overflow=TextOverflow.Ellipsis)
+                    if(m.artist.isNotBlank())Text(m.artist,style=MiuixTheme.textStyles.footnote2,color=c.onSurfaceVariantSummary,maxLines=1,overflow=TextOverflow.Ellipsis)
+                }
+                if(p<0.99f)Row(Modifier.width((96f*(1f-p)).dp).clipToBounds().graphicsLayer{alpha=1f-p},verticalAlignment=Alignment.CenterVertically){
+                    IconButton(onClick={transport(if(m.playing)"PAUSE"else"RESUME")},enabled=p<0.1f){Icon(if(m.playing)MiuixIcons.Pause else MiuixIcons.Play,if(m.playing)stringResource(R.string.pause)else stringResource(R.string.play))}
+                    IconButton(onClick=queue,enabled=p<0.1f){Icon(MiuixIcons.Playlist,stringResource(R.string.play_queue))}
+                }
+                if(p>0.99f)IconButton(onClick={expanded=false}){TransportGlyph("down",stringResource(R.string.collapse_player))}
+            }
+            // One persistent seek node: its center travels from the compact bottom edge
+            // to below the artwork row, while the footer grows underneath it.
+            ThinSeekBar(m.position,m.duration,{m.command("SEEK","position",it);interaction++},
+                Modifier.fillMaxWidth().padding(horizontal=16.dp).offset(y=(50f+34f*p).dp),
+                expansion=p,interactive=p>0.95f,onScrubbing={scrubbing=it})
+            if(p>0.01f)Column(Modifier.fillMaxWidth().offset(y=120.dp).padding(horizontal=20.dp).graphicsLayer{alpha=p}){
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Text(formatTime(m.position),style=MiuixTheme.textStyles.footnote2,color=c.onSurfaceVariantSummary);Text(formatTime(m.duration),style=MiuixTheme.textStyles.footnote2,color=c.onSurfaceVariantSummary)}
+                Row(Modifier.fillMaxWidth().padding(top=4.dp),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically){
+                    IconButton(onClick={m.toggleFavorite();interaction++},enabled=p>0.95f){Icon(if(m.favorite())MiuixIcons.FavoritesFill else MiuixIcons.Favorites,stringResource(R.string.local_favorites))}
+                    IconButton(onClick={transport("PREVIOUS")},enabled=p>0.95f){TransportGlyph("previous",stringResource(R.string.previous))}
+                    IconButton(onClick={transport(if(m.playing)"PAUSE"else"RESUME")},enabled=p>0.95f,backgroundColor=c.primary,minWidth=48.dp,minHeight=48.dp){Icon(if(m.playing)MiuixIcons.Pause else MiuixIcons.Play,if(m.playing)stringResource(R.string.pause)else stringResource(R.string.play),tint=c.onPrimary)}
+                    IconButton(onClick={transport("NEXT")},enabled=p>0.95f){TransportGlyph("next",stringResource(R.string.next))}
+                    IconButton(onClick=queue,enabled=p>0.95f){Icon(MiuixIcons.Playlist,stringResource(R.string.play_queue))}
+                }
+            }
+        }
+    }
+}
+@Composable private fun MusicPlayer(m:MusicState,close:()->Unit,queue:()->Unit,openQuality:()->Unit,modifier:Modifier){
+    val c=MiuixTheme.colorScheme
+    val pager=rememberPagerState(pageCount={2})
+    Scaffold(modifier.fillMaxSize(),containerColor=c.surface,
+        topBar={SmallTopAppBar(modifier=Modifier.graphicsLayer{compositingStrategy=CompositingStrategy.Offscreen},title=stringResource(R.string.now_playing),navigationIcon={IconButton(onClick=close){TransportGlyph("down",stringResource(R.string.collapse_player))}},actions={IconButton(onClick=queue){Icon(MiuixIcons.Playlist,stringResource(R.string.play_queue),tint=c.onSurface)}})},
+        bottomBar={Column(Modifier.fillMaxWidth().graphicsLayer{compositingStrategy=CompositingStrategy.Offscreen}.navigationBarsPadding().padding(horizontal=24.dp,vertical=10.dp)){
+            if(pager.currentPage==0)ThinSeekBar(m.position,m.duration,{m.command("SEEK","position",it)},Modifier.fillMaxWidth())
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Text(formatTime(m.position),style=MiuixTheme.textStyles.footnote2,color=c.onSurfaceVariantSummary);Text(formatTime(m.duration),style=MiuixTheme.textStyles.footnote2,color=c.onSurfaceVariantSummary)}
+            Row(Modifier.fillMaxWidth().padding(top=10.dp),horizontalArrangement=Arrangement.SpaceEvenly,verticalAlignment=Alignment.CenterVertically){
+                IconButton(onClick=m::cyclePlaybackMode,minWidth=48.dp,minHeight=48.dp){TransportGlyph(when(m.playbackMode){"SHUFFLE"->"shuffle";"LOOP"->"repeat";"SINGLE"->"repeat_one";else->"order"},stringResource(playbackLabel(m.playbackMode)),if(m.playbackMode=="ORDER")c.onSurface else c.primary)}
+                IconButton(onClick={m.command("PREVIOUS")}){TransportGlyph("previous",stringResource(R.string.previous))}
+                IconButton(onClick={m.command(if(m.playing)"PAUSE"else"RESUME")},backgroundColor=c.primary,minWidth=68.dp,minHeight=68.dp,cornerRadius=20.dp){Icon(if(m.playing)MiuixIcons.Pause else MiuixIcons.Play,if(m.playing)stringResource(R.string.pause)else stringResource(R.string.play),tint=c.onPrimary,modifier=Modifier.size(28.dp))}
+                IconButton(onClick={m.command("NEXT")}){TransportGlyph("next",stringResource(R.string.next))}
+                IconButton(onClick=queue){Icon(MiuixIcons.Playlist,stringResource(R.string.play_queue))}
+            }
+            if(pager.currentPage==1)ThinSeekBar(m.position,m.duration,{m.command("SEEK","position",it)},Modifier.fillMaxWidth(),framed=true)
+        }}){padding->
+        Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)){
+            Row(Modifier.padding(horizontal=28.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)){
+                if(pager.currentPage==1)Artwork(m.cover,m.title,Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)))
+                Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)){
+                    Text(m.title.ifBlank{stringResource(R.string.not_playing)},style=MiuixTheme.textStyles.title3,maxLines=1,overflow=TextOverflow.Ellipsis)
+                    Text(m.artist,style=MiuixTheme.textStyles.footnote1,color=c.onSurfaceVariantSummary,maxLines=1,overflow=TextOverflow.Ellipsis)
+                }
+                TextButton(if(m.qualityPending)stringResource(R.string.quality_switching)else qualityBadge(m.actualQuality,m.qualityDowngraded),openQuality,Modifier.heightIn(min=48.dp))
+                IconButton(onClick=m::toggleFavorite){Icon(if(m.favorite())MiuixIcons.FavoritesFill else MiuixIcons.Favorites,stringResource(R.string.local_favorites),tint=c.onSurface)}
+            }
+            if(m.status.isNotBlank())Text(m.status,Modifier.padding(horizontal=28.dp,vertical=8.dp),style=MiuixTheme.textStyles.footnote1,color=c.onSurfaceVariantSummary)
+            HorizontalPager(pager,Modifier.weight(1f).fillMaxWidth()){page->
+                if(page==0)Box(Modifier.fillMaxSize().padding(28.dp),contentAlignment=Alignment.Center){Artwork(m.cover,m.title,Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(20.dp)))}
+                else SynchronizedLyrics(m,pager.currentPage==1)
+            }
+        }
+    }
+}
+private fun formatTime(ms:Int)="%02d:%02d".format(ms.coerceAtLeast(0)/60000,ms.coerceAtLeast(0)/1000%60)
+@Composable private fun TransportGlyph(kind:String,label:String,tint:Color=MiuixTheme.colorScheme.onSurface){
+    val color=tint.toArgb()
+    Canvas(Modifier.size(24.dp).semantics{contentDescription=label}){val icon=MusicIcon(kind,color);icon.setBounds(0,0,size.width.toInt(),size.height.toInt());icon.draw(drawContext.canvas.nativeCanvas)}
+}

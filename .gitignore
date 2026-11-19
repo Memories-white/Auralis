@@ -1,0 +1,34 @@
+core/target/
+core/.tmp/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+.idea/
+design/.chrome-preview/
+tools/.test-classes/
+android/.resource-check/
+android/.build-temp/
+device-debug/
+
+# Release downloads belong to GitHub Releases, not source history.
+APKs/
+android/app/src/main/jniLibs/**/*.so
+
+# Local credentials, signing material and editor state.
+.env
+.env.*
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+*.log
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Historical visual experiments; current implementation is documented in docs/.
+design/legacy-v025/
+design/theme-preview.*
+design/contrast-report.txt

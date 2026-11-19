@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-labelledby="title desc">
+  <title id="title">Auralis</title>
+  <desc id="desc">Rust-powered music. Designed for Android.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#101B32"/><stop offset="1" stop-color="#07101E"/></linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#79B9FF"/><stop offset="1" stop-color="#3482FF"/></linearGradient>
+  </defs>
+  <rect width="1200" height="320" rx="28" fill="url(#bg)"/>
+  <g stroke="#3482FF" opacity=".12" fill="none"><circle cx="1080" cy="120" r="180"/><circle cx="1080" cy="120" r="230"/><circle cx="1080" cy="120" r="280"/></g>
+  <rect x="64" y="80" width="152" height="152" rx="44" fill="url(#accent)"/>
+  <g stroke="#FFF" stroke-width="9" stroke-linecap="round"><path d="M100 143v26m20-47v68m20-88v108m20-77v46m20-33v20"/></g>
+  <g font-family="Inter, Segoe UI, Arial, sans-serif">
+    <text x="256" y="151" fill="#FFF" font-size="68" font-weight="600" letter-spacing="-2">Auralis</text>
+    <text x="260" y="194" fill="#B6C6DF" font-size="23">Rust-powered music. Designed for Android.</text>
+    <text x="260" y="237" fill="#79B9FF" font-size="16" letter-spacing="2">RUST / JETPACK COMPOSE / MIUIX</text>
+  </g>
+</svg>
