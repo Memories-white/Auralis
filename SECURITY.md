@@ -2,7 +2,7 @@
 
 ## 凭据与数据
 
-QQ 登录凭据使用 Android Keystore AES-GCM 加密后保存到应用私有目录。源码仓库不包含真实账号会话、私钥、签名 keystore、授权音源地址或设备调试导出。
+账号登录凭据使用 Android Keystore AES-GCM 加密后保存到应用私有目录。源码仓库不包含真实账号会话、私钥、签名 keystore、授权音源地址或设备调试导出。
 
 请不要把二维码、Cookie、musicKey、登录 token、应用私有目录或完整带参数播放地址提交到 Issue、PR、截图或日志附件。
 

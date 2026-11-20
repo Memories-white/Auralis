@@ -231,7 +231,7 @@ fn exchange_login(redirect: &str, sig: &str) -> Result<Value, String> {
     let data = &login["login"]["data"];
     let key = field(data, "musickey");
     if key.is_empty() {
-        return Err("QQ 音乐未签发 music key；请重新登录".into());
+        return Err("音乐服务未签发 music key；请重新登录".into());
     }
     let uin = if field(data, "str_musicid").is_empty() {
         as_text(&data["musicid"])
@@ -357,7 +357,7 @@ fn quality_candidates(preference: &str, fallback: bool) -> Result<Vec<(&'static 
 }
 fn select_playback(root: &Value, preference: &str, fallback: bool) -> Result<Value, String> {
     if number(&root["code"]) == Some(2000) {
-        return Err("QQ 音乐登录已过期，请重新扫码登录".into());
+        return Err("音乐服务登录已过期，请重新扫码登录".into());
     }
     let mut diagnostics = Vec::new();
     for (name, _, _) in quality_candidates(preference, fallback)? {
@@ -470,20 +470,20 @@ fn lyrics(mid: &str, id: u64, cookies: &Value) -> Result<Value, String> {
 }
 fn account_request(session: &Value, requests: Value) -> Result<Value, String> {
     if field(session, "musicKey").is_empty() {
-        return Err("请先登录 QQ 音乐账号".into());
+        return Err("请先登录音乐服务账号".into());
     }
     let mut payload = requests;
     payload["comm"] = json!({"uin":field(session,"uin"),"authst":field(session,"musicKey"),"ct":20,"cv":1770,"format":"json","platform":"wk_v17"});
     let root = gateway(payload, &session["cookies"])?;
     if root["code"].as_i64().unwrap_or(0) != 0 {
-        return Err("QQ 音乐登录已失效或请求被拒绝，请重新登录".into());
+        return Err("音乐服务登录已失效或请求被拒绝，请重新登录".into());
     }
     Ok(root)
 }
 fn songs_in(data: &Value, key: &str) -> Result<Value, String> {
     let list = data[key]
         .as_array()
-        .ok_or("QQ 音乐未返回歌曲列表，请刷新或重新登录")?;
+        .ok_or("音乐服务未返回歌曲列表，请刷新或重新登录")?;
     Ok(Value::Array(
         list.iter().filter_map(normalize_song).collect(),
     ))

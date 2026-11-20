@@ -1,5 +1,5 @@
 <resources>
-    <string name="login_qq">登录 QQ 音乐</string>
+    <string name="login_qq">登录音乐服务</string>
     <string name="login_qr">QQ 登录二维码</string>
     <string name="get_qr_again">重新获取</string>
     <string name="cancel">取消</string>
@@ -22,12 +22,12 @@
     <string name="recommended_songs">推荐歌曲</string>
     <string name="recommended_playlists">推荐歌单</string>
     <string name="music_knows_you">让音乐更懂你</string>
-    <string name="sync_qq_summary">同步 QQ 音乐的喜欢与歌单</string>
+    <string name="sync_qq_summary">同步音乐服务的喜欢与歌单</string>
     <string name="search_hint">搜索歌曲、歌手或专辑</string>
     <string name="search_empty">寻找下一首心动</string>
     <string name="search_empty_summary">输入关键词，发现喜欢的音乐</string>
     <string name="avatar">用户头像</string>
-    <string name="qq_user">QQ 音乐用户</string>
+    <string name="qq_user">音乐服务用户</string>
     <string name="music_with_you">你的音乐，随时相伴</string>
     <string name="login_library_summary">登录后同步喜欢与歌单</string>
     <string name="collections">音乐收藏</string>
@@ -63,7 +63,7 @@
     <string name="request_failed">请求失败</string>
     <string name="request_retry">请求失败，请重试</string>
     <string name="network_retry">网络连接失败，请检查网络后重试</string>
-    <string name="login_recommendations">登录 QQ 音乐，开启你的专属推荐</string>
+    <string name="login_recommendations">登录音乐服务，开启你的专属推荐</string>
     <string name="loading_recommendations">正在更新推荐</string>
     <string name="loading_library">正在同步我的音乐</string>
     <string name="loading_playlist">正在加载歌单</string>
@@ -165,12 +165,12 @@
     <string name="song_actions">歌曲选项</string>
     <string name="add_to_likes">添加到我的喜欢</string>
     <string name="already_liked">已在我的喜欢</string>
-    <string name="cloud_likes_summary">同步到 QQ 音乐账号</string>
+    <string name="cloud_likes_summary">同步到音乐服务账号</string>
     <string name="add_to_playlist">添加到歌单</string>
-    <string name="owned_playlist_summary">选择你创建的 QQ 音乐歌单</string>
-    <string name="no_writable_playlists">还没有可添加的自建歌单，请先在 QQ 音乐创建歌单。</string>
+    <string name="owned_playlist_summary">选择你创建的音乐服务歌单</string>
+    <string name="no_writable_playlists">还没有可添加的自建歌单，请先在音乐服务创建歌单。</string>
     <string name="adding_song">正在添加…</string>
-    <string name="song_added">已添加到 QQ 音乐</string>
+    <string name="song_added">已添加到音乐服务</string>
     <string name="song_already_present">已确认歌曲在该歌单中</string>
     <string name="song_add_accepted">QQ 已受理请求，刷新歌单确认添加结果</string>
     <string name="song_information">歌曲信息</string>

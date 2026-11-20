@@ -76,7 +76,7 @@ android/app/build/outputs/apk/debug/app-debug.apk
 .\test.ps1 -Offline
 ```
 
-运行 Rust 单元测试，以及独立的 Java 播放顺序、图片磁盘缓存和封面取色检查。这些测试不需要 QQ 登录，也不会读取真实账号凭据。仅做协议层测试时可运行：
+运行 Rust 单元测试，以及独立的 Java 播放顺序、图片磁盘缓存和封面取色检查。这些测试不需要 账号登录，也不会读取真实账号凭据。仅做协议层测试时可运行：
 
 ```powershell
 cargo test --manifest-path core/Cargo.toml --locked --offline

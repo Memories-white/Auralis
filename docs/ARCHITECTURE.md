@@ -10,7 +10,7 @@ flowchart TD
     State --> JNI[RustCore / JNI]
     JNI --> Core[Rust QQ 协议与数据归一化]
     Core --> HTTP[AndroidHttp 系统 HTTPS]
-    HTTP --> QQ[QQ 音乐服务]
+    HTTP --> QQ[音乐服务服务]
     State --> Service[PlayerService]
     Service --> Player[Android MediaPlayer]
     Service --> Session[Framework MediaSession]
@@ -25,7 +25,7 @@ Rust 负责请求参数、响应解析、登录状态、曲库、搜索、授权
 
 | 位置 | 责任 |
 | :-- | :-- |
-| `core/src/lib.rs` | QQ 接口、数据模型归一化、音质候选与响应选择、JNI 入口 |
+| `core/src/lib.rs` | 服务接口、数据模型归一化、音质候选与响应选择、JNI 入口 |
 | `core/src/discovery.rs` | 个性化歌曲货架分页、每日 / 已展示排除、云端添加及成员核对 |
 | `core/src/android_http.rs` | Rust 到 Android HTTPS 的桥接 |
 | `MusicState.kt` | 页面业务状态、账号、异步结果、队列与偏好 |

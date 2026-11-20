@@ -32,3 +32,6 @@ Thumbs.db
 design/legacy-v025/
 design/theme-preview.*
 design/contrast-report.txt
+
+# Retain an old branded screenshot locally, outside the current repository presentation.
+docs/assets/song-actions-dark.png

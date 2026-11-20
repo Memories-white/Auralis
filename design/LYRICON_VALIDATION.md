@@ -4,7 +4,7 @@
 
 ## 已确认
 
-- 手机已安装的 Provider 与 `LyriconProvider/APKs/LyriconProvider-Auralis-QQMusicLite-release-signed.apk` 完全一致，SHA256 `BF94281FBA2185624040F6A83CD795F5980ACA94116A718EED93894649651244`。
+- 手机已安装的适配版 Provider 经校验一致，SHA256 `BF94281FBA2185624040F6A83CD795F5980ACA94116A718EED93894649651244`。
 - 现有工作区路由、数组及 scope.list 均包含 Auralis；未覆盖其他聊天保留的未提交改动。
 - 4 项 AuralisLyricsTest 全部通过：独立翻译轨、缺少翻译、占位/超时翻译、增强逐字标签保留。
 - 播放器使用 Framework MediaSession，MEDIA_ID 为真实歌曲 mid；`lyricInfo` 内使用 `lyric` 与 `transLyric`。原文和翻译沿独立字段发布。

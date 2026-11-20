@@ -104,7 +104,7 @@ pub fn add_song(session: &Value, dir: u64, song_id: u64) -> Result<Value, String
         return Err("缺少有效的歌单或歌曲编号".into());
     }
     if field(session, "musicKey").is_empty() {
-        return Err("请先登录 QQ 音乐".into());
+        return Err("请先登录音乐服务".into());
     }
     let root = gateway(
         json!({"comm":{"ct":11,"cv":14090008,"v":14090008,"chid":"10003505","tmeAppID":"qqmusic","tmeLoginType":2,"qq":field(session,"uin"),"uin":field(session,"uin"),"authst":field(session,"musicKey")},"add":{"module":"music.musicasset.PlaylistDetailWrite","method":"AddSonglist","param":{"dirId":dir,"v_songInfo":[{"songId":song_id,"songType":0}]}}}),
@@ -135,7 +135,7 @@ pub fn add_song(session: &Value, dir: u64, song_id: u64) -> Result<Value, String
 }
 fn write_result(root: &Value) -> Result<Value, String> {
     if number(&root["code"]).unwrap_or(0) != 0 || number(&root["add"]["code"]) != Some(0) {
-        return Err("QQ 音乐未接受添加请求，请检查登录与歌单权限".into());
+        return Err("音乐服务未接受添加请求，请检查登录与歌单权限".into());
     }
     let data = &root["add"]["data"];
     if number(&data["succ_song_num"]).unwrap_or(0) > 0 {
