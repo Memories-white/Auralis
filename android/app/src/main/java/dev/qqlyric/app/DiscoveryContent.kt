@@ -23,31 +23,33 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
 /** Content only: the existing shell owns scroll, insets, navigation and the player. */
 fun LazyListScope.homeDiscovery(m:MusicState,showQueue:()->Unit){
     val daily=m.home.optJSONArray("daily")?.objects().orEmpty()
-    item("discovery-shortcuts"){
-        val favorites=stringResource(R.string.local_favorites)
-        LazyRow(contentPadding=PaddingValues(horizontal=12.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            item{TextButton(favorites,{m.openSongs(m.favorites,favorites)})}
-            item{TextButton(stringResource(R.string.play_queue),showQueue)}
-        }
-    }
     item("daily-feature"){
         Card(Modifier.padding(horizontal=12.dp,vertical=12.dp).fillMaxWidth(),onClick=m::daily,pressFeedbackType=PressFeedbackType.Sink){
-            Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)){
-                Artwork(daily.firstOrNull()?.artwork().orEmpty(),stringResource(R.string.daily_cover),Modifier.size(72.dp).clip(RoundedCornerShape(12.dp)))
-                Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)){
+            Row(Modifier.padding(20.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(16.dp)){
+                Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(10.dp)){
                     Text(stringResource(R.string.made_for_you),style=MiuixTheme.textStyles.footnote1,color=MiuixTheme.colorScheme.primary)
-                    Text(stringResource(R.string.daily_mix),style=MiuixTheme.textStyles.title3)
+                    Text(stringResource(R.string.daily_mix),style=MiuixTheme.textStyles.title2)
                     Text(stringResource(if(m.loggedIn)R.string.daily_summary else R.string.daily_login_summary),style=MiuixTheme.textStyles.footnote2,color=MiuixTheme.colorScheme.onSurfaceVariantSummary,maxLines=2,overflow=TextOverflow.Ellipsis)
                 }
-                IconButton(onClick={if(daily.isEmpty())m.daily()else m.play(daily,0)},backgroundColor=MiuixTheme.colorScheme.primary,minWidth=48.dp,minHeight=48.dp){Icon(MiuixIcons.Play,stringResource(R.string.play_daily),tint=MiuixTheme.colorScheme.onPrimary)}
+                Box(Modifier.size(112.dp)){
+                    Artwork(daily.firstOrNull()?.artwork().orEmpty(),stringResource(R.string.daily_cover),Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)))
+                    IconButton(onClick={if(daily.isEmpty())m.daily()else m.play(daily,0)},modifier=Modifier.align(Alignment.BottomEnd),backgroundColor=MiuixTheme.colorScheme.primary,minWidth=48.dp,minHeight=48.dp){Icon(MiuixIcons.Play,stringResource(R.string.play_daily),tint=MiuixTheme.colorScheme.onPrimary)}
+                }
             }
+        }
+    }
+    item("discovery-shortcuts"){
+        val favorites=stringResource(R.string.local_favorites)
+        Row(Modifier.fillMaxWidth().padding(horizontal=12.dp).padding(bottom=12.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)){
+            Card(Modifier.weight(1f),onClick={m.openSongs(m.favorites,favorites)},pressFeedbackType=PressFeedbackType.Sink){Row(Modifier.heightIn(min=48.dp).padding(14.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)){Icon(MiuixIcons.Favorites,null,Modifier.size(20.dp),tint=MiuixTheme.colorScheme.primary);Text(favorites,style=MiuixTheme.textStyles.footnote1)}}
+            Card(Modifier.weight(1f),onClick=showQueue,pressFeedbackType=PressFeedbackType.Sink){Row(Modifier.heightIn(min=48.dp).padding(14.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)){Icon(MiuixIcons.Playlist,null,Modifier.size(20.dp),tint=MiuixTheme.colorScheme.primary);Text(stringResource(R.string.play_queue),style=MiuixTheme.textStyles.footnote1)}}
         }
     }
     item("recommend-header"){SectionHeader(stringResource(R.string.recommended_songs),m::refreshHome)}
     item("songs-shelf"){if(m.discoverySongs.isNotEmpty())AlbumShelf(m.discoverySongs.take(6),false){_,i->m.play(m.discoverySongs,i)}else DiscoveryLoadState(m)}
-    item("playlists-header"){SmallTitle(stringResource(R.string.recommended_playlists))}
+    item("playlists-header"){MusicSectionTitle(stringResource(R.string.recommended_playlists))}
     item("playlists-shelf"){AlbumShelf(m.recommendations(),true){s,_->m.playlist(s.optLong("id"),0,s.optString("title"))}}
-    item("more-music"){SmallTitle(stringResource(R.string.keep_discovering))}
+    item("more-music"){MusicSectionTitle(stringResource(R.string.keep_discovering))}
     itemsIndexed(m.discoverySongs.drop(6),key={i,s->"discovery:${s.optString("mid")}:$i"}){i,s->SongRow(s,playingSong(m,s)){m.play(m.discoverySongs,i+6)}}
     item("discovery-load"){if(m.discoverySongs.isNotEmpty())DiscoveryLoadState(m)}
     if(!m.loggedIn)item("login-discovery"){EmptyMessage(stringResource(R.string.music_knows_you),stringResource(R.string.sync_qq_summary));TextButton(stringResource(R.string.login_qq),m::login,Modifier.padding(horizontal=12.dp).fillMaxWidth())}
@@ -86,7 +88,7 @@ fun LazyListScope.searchDiscovery(m:MusicState){
         item("search-recommend-header"){SectionHeader(stringResource(R.string.search_recommendations),m::refreshHome)}
         if(daily.isNotEmpty()){
             item("search-featured"){AlbumShelf(daily.take(6),false){_,i->m.play(daily,i)}}
-            item("search-list-header"){SmallTitle(stringResource(R.string.listen_now))}
+            item("search-list-header"){MusicSectionTitle(stringResource(R.string.listen_now))}
             itemsIndexed(daily.drop(6).take(6),key={i,s->"search-discover:${s.optString("mid")}:$i"}){i,s->SongRow(s,playingSong(m,s)){m.play(daily,i+6)}}
         }else item("search-discovery-empty"){
             EmptyMessage(stringResource(R.string.search_empty),stringResource(if(m.loggedIn)R.string.recommendation_empty_summary else R.string.sync_qq_summary))

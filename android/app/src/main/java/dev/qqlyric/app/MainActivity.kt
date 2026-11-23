@@ -146,7 +146,7 @@ class MainActivity:ComponentActivity(){
         }
     },bottomBar={if(m.page !in SETTINGS_PAGES)Column(Modifier.background(c.surface).then(if(secondary)Modifier.navigationBarsPadding()else Modifier).graphicsLayer{compositingStrategy=CompositingStrategy.Offscreen}){
         MiniPlayer(m,playerSurface.padding(horizontal=12.dp,vertical=6.dp),openPlayer,showQueue)
-        if(m.page=="home"||m.page=="mine")NavigationBar{
+        if(m.page=="home"||m.page=="mine")NavigationBar(showDivider=false){
             listOf(Triple("home",stringResource(R.string.home),MiuixIcons.Home),Triple("mine",stringResource(R.string.mine),MiuixIcons.Contacts)).forEach{(page,label,icon)->
                 NavigationBarItem(selected=(if(m.page=="settings")"mine"else if(m.page=="songs")m.parentPage else m.page)==page,onClick={m.navigate(page)},icon=icon,label=label)
             }
@@ -204,7 +204,8 @@ class MainActivity:ComponentActivity(){
     }
 }
 
-@Composable internal fun SectionHeader(title:String,refresh:()->Unit){Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){Box(Modifier.weight(1f)){SmallTitle(title)};IconButton(onClick=refresh,modifier=Modifier.padding(end=12.dp)){Icon(MiuixIcons.Refresh,stringResource(R.string.refresh))}}}
+@Composable internal fun MusicSectionTitle(title:String){Text(title,Modifier.padding(start=24.dp,end=16.dp,top=20.dp,bottom=12.dp).semantics{heading()},style=MiuixTheme.textStyles.title3,color=MiuixTheme.colorScheme.onSurface)}
+@Composable internal fun SectionHeader(title:String,refresh:()->Unit){Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){Box(Modifier.weight(1f)){MusicSectionTitle(title)};IconButton(onClick=refresh,modifier=Modifier.padding(end=16.dp,top=8.dp)){Icon(MiuixIcons.Refresh,stringResource(R.string.refresh),Modifier.size(22.dp),tint=MiuixTheme.colorScheme.onSurfaceVariantSummary)}}}
 @Composable internal fun EmptyMessage(title:String,summary:String){Column(Modifier.fillMaxWidth().padding(28.dp,40.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text(title,style=MiuixTheme.textStyles.title3);Text(summary,color=MiuixTheme.colorScheme.onSurfaceVariantSummary)}}
 internal fun playingSong(m:MusicState,song:JSONObject)=m.queue.getOrNull(PlayerService.currentIndex)?.optString("mid")==song.optString("mid")
 
@@ -218,15 +219,15 @@ internal fun playingSong(m:MusicState,song:JSONObject)=m.queue.getOrNull(PlayerS
 }
 @Composable internal fun AlbumShelf(songs:List<JSONObject>,playlists:Boolean,onClick:(JSONObject,Int)->Unit){
     if(songs.isEmpty()){EmptyMessage(stringResource(R.string.recommendation_empty),stringResource(R.string.recommendation_empty_summary));return}
-    LazyRow(contentPadding=PaddingValues(horizontal=12.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)){
+    LazyRow(contentPadding=PaddingValues(horizontal=24.dp),horizontalArrangement=Arrangement.spacedBy(16.dp)){
         itemsIndexed(songs.take(12),key={i,s->"${s.optString("mid",s.optString("id"))}:$i"}){i,song->
-            Card(Modifier.width(144.dp),onClick={onClick(song,i)},pressFeedbackType=PressFeedbackType.Sink){
-                Box(Modifier.fillMaxWidth().padding(10.dp)){
-                    Artwork(if(playlists)song.optString("cover")else song.artwork(),song.optString("title"),Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(10.dp)))
-                    if(!playlists)Box(Modifier.align(Alignment.BottomEnd).padding(8.dp).size(28.dp).clip(CircleShape).background(MiuixTheme.colorScheme.primary),contentAlignment=Alignment.Center){Icon(MiuixIcons.Play,null,Modifier.size(16.dp),tint=MiuixTheme.colorScheme.onPrimary)}
+            Column(Modifier.width(156.dp).clip(RoundedCornerShape(16.dp)).clickable(role=androidx.compose.ui.semantics.Role.Button){onClick(song,i)}){
+                Box(Modifier.fillMaxWidth().aspectRatio(1f)){
+                    Artwork(if(playlists)song.optString("cover")else song.artwork(),song.optString("title"),Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)))
+                    if(!playlists)Box(Modifier.align(Alignment.BottomEnd).padding(10.dp).size(32.dp).clip(CircleShape).background(MiuixTheme.colorScheme.primary),contentAlignment=Alignment.Center){Icon(MiuixIcons.Play,null,Modifier.size(18.dp),tint=MiuixTheme.colorScheme.onPrimary)}
                 }
-                Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(4.dp)){
-                    Text(song.optString("title"),style=MiuixTheme.textStyles.body1,maxLines=1,overflow=TextOverflow.Ellipsis)
+                Column(Modifier.padding(top=10.dp,bottom=8.dp),verticalArrangement=Arrangement.spacedBy(4.dp)){
+                    Text(song.optString("title"),style=MiuixTheme.textStyles.body1,maxLines=2,minLines=2,overflow=TextOverflow.Ellipsis)
                     Text(if(playlists)stringResource(R.string.curated_playlist)else song.optString("artist"),style=MiuixTheme.textStyles.footnote1,color=MiuixTheme.colorScheme.onSurfaceVariantSummary,maxLines=1,overflow=TextOverflow.Ellipsis)
                 }
             }
@@ -234,15 +235,15 @@ internal fun playingSong(m:MusicState,song:JSONObject)=m.queue.getOrNull(PlayerS
     }
 }
 @Composable internal fun SongRow(song:JSONObject,selected:Boolean,onClick:()->Unit){
-    Card(Modifier.padding(horizontal=12.dp,vertical=4.dp).fillMaxWidth(),onClick=onClick,pressFeedbackType=PressFeedbackType.Sink){
-        Row(Modifier.padding(12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)){
-            Artwork(song.artwork(),song.optString("title"),Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)))
-            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)){
-                Text(song.optString("title"),color=if(selected)MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,maxLines=1,overflow=TextOverflow.Ellipsis)
-                Text(song.optString("artist"),style=MiuixTheme.textStyles.footnote1,color=MiuixTheme.colorScheme.onSurfaceVariantSummary,maxLines=1,overflow=TextOverflow.Ellipsis)
-            }
-            if(song.optBoolean("vip"))Text("VIP",style=MiuixTheme.textStyles.footnote2,color=MiuixTheme.colorScheme.primary)
+    val c=MiuixTheme.colorScheme
+    Row(Modifier.padding(horizontal=12.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(if(selected)c.surfaceContainer else Color.Transparent).clickable(role=androidx.compose.ui.semantics.Role.Button,onClick=onClick).padding(horizontal=12.dp,vertical=10.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)){
+        Artwork(song.artwork(),song.optString("title"),Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)))
+        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(5.dp)){
+            Text(song.optString("title"),style=MiuixTheme.textStyles.body1,color=if(selected)c.primary else c.onSurface,maxLines=1,overflow=TextOverflow.Ellipsis)
+            Text(song.optString("artist"),style=MiuixTheme.textStyles.footnote1,color=c.onSurfaceVariantSummary,maxLines=1,overflow=TextOverflow.Ellipsis)
         }
+        if(selected)Icon(MiuixIcons.Play,stringResource(R.string.now_playing),Modifier.size(18.dp),tint=c.primary)
+        else if(song.optBoolean("vip"))Text("VIP",style=MiuixTheme.textStyles.footnote2,color=c.onSurfaceVariantSummary)
     }
 }
 @Composable private fun MiniPlayer(m:MusicState,modifier:Modifier,open:()->Unit,queue:()->Unit){
@@ -259,15 +260,15 @@ internal fun playingSong(m:MusicState,song:JSONObject)=m.queue.getOrNull(PlayerS
     val c=MiuixTheme.colorScheme
     val transport:(String)->Unit={action->interaction++;m.command(action)}
     Card(modifier.fillMaxWidth(),onClick=open,pressFeedbackType=PressFeedbackType.Sink){
-        Box(Modifier.fillMaxWidth().height((80f+120f*p).dp)){
-            Row(Modifier.fillMaxWidth().height((68f+16f*p).dp).padding(horizontal=12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)){
+        Box(Modifier.fillMaxWidth().height((72f+128f*p).dp)){
+            Row(Modifier.fillMaxWidth().height((60f+24f*p).dp).padding(horizontal=12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)){
                 Artwork(m.cover,m.title,Modifier.size((44f+12f*p).dp).clip(RoundedCornerShape(10.dp)))
                 Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)){
                     Text(m.title.ifBlank{stringResource(R.string.select_song)},style=MiuixTheme.textStyles.body1,maxLines=1,overflow=TextOverflow.Ellipsis)
                     if(m.artist.isNotBlank())Text(m.artist,style=MiuixTheme.textStyles.footnote2,color=c.onSurfaceVariantSummary,maxLines=1,overflow=TextOverflow.Ellipsis)
                 }
                 if(p<0.99f)Row(Modifier.width((96f*(1f-p)).dp).clipToBounds().graphicsLayer{alpha=1f-p},verticalAlignment=Alignment.CenterVertically){
-                    IconButton(onClick={transport(if(m.playing)"PAUSE"else"RESUME")},enabled=p<0.1f){Icon(if(m.playing)MiuixIcons.Pause else MiuixIcons.Play,if(m.playing)stringResource(R.string.pause)else stringResource(R.string.play))}
+                    IconButton(onClick={transport(if(m.playing)"PAUSE"else"RESUME")},enabled=p<0.1f,backgroundColor=c.primary){Icon(if(m.playing)MiuixIcons.Pause else MiuixIcons.Play,if(m.playing)stringResource(R.string.pause)else stringResource(R.string.play),tint=c.onPrimary)}
                     IconButton(onClick=queue,enabled=p<0.1f){Icon(MiuixIcons.Playlist,stringResource(R.string.play_queue))}
                 }
                 if(p>0.99f)IconButton(onClick={expanded=false}){TransportGlyph("down",stringResource(R.string.collapse_player))}
@@ -275,7 +276,7 @@ internal fun playingSong(m:MusicState,song:JSONObject)=m.queue.getOrNull(PlayerS
             // One persistent seek node: its center travels from the compact bottom edge
             // to below the artwork row, while the footer grows underneath it.
             ThinSeekBar(m.position,m.duration,{m.command("SEEK","position",it);interaction++},
-                Modifier.fillMaxWidth().padding(horizontal=16.dp).offset(y=(50f+34f*p).dp),
+                Modifier.fillMaxWidth().padding(horizontal=16.dp).offset(y=(42f+42f*p).dp),
                 expansion=p,interactive=p>0.95f,onScrubbing={scrubbing=it})
             if(p>0.01f)Column(Modifier.fillMaxWidth().offset(y=120.dp).padding(horizontal=20.dp).graphicsLayer{alpha=p}){
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Text(formatTime(m.position),style=MiuixTheme.textStyles.footnote2,color=c.onSurfaceVariantSummary);Text(formatTime(m.duration),style=MiuixTheme.textStyles.footnote2,color=c.onSurfaceVariantSummary)}

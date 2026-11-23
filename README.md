@@ -12,6 +12,8 @@
 
 ## 关于 Auralis
 
+UI 调整预览：[0.3.7-preview](https://github.com/Memories-white/Auralis/releases/tag/v0.3.7-preview)。该预览尚未完成实机视觉检查，下面的历史截图不代表新布局效果。
+
 Auralis 是面向 Android 的音频应用学习项目，使用 **Rust** 探索协议适配与数据处理，使用 **Kotlin / Jetpack Compose** 构建原生界面。界面统一采用 **MIUIX**，用于研究明暗主题、动态配色、同步歌词、后台播放和系统媒体会话。
 
 项目处于持续迭代阶段，当前版本为 **0.3.6**。部分演示功能依赖外部服务及账号授权，受服务条款、地区和内容权益限制；本项目与任何第三方服务提供方均无隶属或官方合作关系。
