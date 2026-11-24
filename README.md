@@ -31,13 +31,13 @@ Auralis 是面向 Android 的音频应用学习项目，使用 **Rust** 探索�
   </tr>
   <tr>
     <td><img src="docs/assets/search-light.png" alt="浅色搜索页：推荐歌手和歌曲" width="240" /></td>
-    <td><img src="docs/assets/player-dark.png" alt="深色封面播放页" width="240" /></td>
+    <td><img src="docs/assets/player-preview-dark.png" alt="0.3.8-preview 深色封面播放页" width="240" /></td>
     <td><img src="docs/assets/lyrics-dark.png" alt="清晰当前句、渐进模糊和底部进度" width="240" /></td>
     <td><img src="docs/assets/expanded-player-dark.png" alt="展开歌曲栏：封面信息、进度和播放控制" width="240" /></td>
   </tr>
 </table>
 
-搜索与歌曲栏截图来自 0.3.4，封面与歌词截图来自布局延续至今的 0.3.3 实机版本。图片中的音乐封面属于各自权利人，仅用于展示播放器界面。
+封面播放器截图来自 0.3.8-preview；搜索与歌曲栏来自 0.3.4，歌词来自 0.3.3。图片中的音乐封面属于各自权利人，仅用于展示播放器界面。
 
 <details>
 <summary><b>展开查看歌曲信息页</b></summary>
