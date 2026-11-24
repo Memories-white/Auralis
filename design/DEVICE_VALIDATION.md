@@ -1,3 +1,17 @@
+# v0.3.8-preview 音乐库、播放器与听歌工具（2026-11-24）
+
+- Rust arm64 release、Android assembleDebug 与独立 androidTest APK 构建成功。Rust 14 项、PlaybackOrder、ArtworkDiskStore、ArtworkSeed 及新增 SleepTimer JVM 检查通过。
+- Redmi K60 保留数据覆盖安装 code 18。音乐库四入口、真实歌单封面概览、返回栈和播放器重排已检查；顶栏右侧睡眠 / 队列操作在新实现中可见，时钟可打开定时面板。
+- 固定 beta01 SmallTopAppBar 的自定义布局测量了 actionIconsPlaceable，却未在放置阶段绘制；源码与设备 UI 树相符。改用库内 TopAppBar(expandable=false)，没有复制第三方布局实现。
+- 独立测试 APK 使用生成的 120 秒静音 WAV，通过正常 PlayerService 播放，实测开始播放后记入最近、暂停 / 恢复不重复、第二首移到最前；LOOP 模式跳到曲尾后，“歌曲结束后暂停”成功阻止循环。随后服务实际计时一分钟并暂停，倒计时会随经过时间递减。
+- 测试结束后重开应用仍能显示本机测试记录；最近播放 UI 的取消保留与确认清空均通过。测试音频、记录与独立测试组件在交付前清理，恢复原顺序偏好。原始证据保存在忽略目录，不上传账号资料、二维码或个人通知截图。
+- 外部服务的真实歌曲播放地址曾连续返回 104003；用户重新登录时，界面显示登录域名 DNS 失败。随后手机 shell 可解析该域名；应用增加有限网络重试，取消 / 重取二维码时通过代次失效旧请求。最终 APK 的登录窗口实测显示“等待扫码”，确认二维码获取及状态查询可用；账号最终扫码确认与获取音源仍是独立验证步骤。
+- 本轮没有完成真实流播放、会员音质与 Provider 的再次回归；也没有全部 ROM / 平板 / 大字体或量化帧率结果。定时不请求精确闹钟权限，深度休眠下的唤醒精度未实测。
+
+交付 `APKs/Auralis-v0.3.8-preview.apk`，18,508,723 bytes。SHA256 `4C20EE0464CD38CD0692B15E4EC1F69A58D9318F7B7CD58FFDD8CF4910ABC81D`；16 KB zipalign 和 APK v2 签名校验通过，手机安装目录回读 base.apk 哈希一致。
+
+---
+
 # v0.3.6 应用图标（2026-11-19）
 
 - Android assembleDebug 成功，资源检查确认 Manifest 的 application icon 指向自适应 ic_launcher，圆形入口及 Android 13+ monochrome 配置齐全。

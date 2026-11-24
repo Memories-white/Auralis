@@ -70,6 +70,8 @@ class MainActivity:ComponentActivity(){
         var queue by remember{mutableStateOf(false)}
         var qualityMenu by remember{mutableStateOf(false)}
         var confirmLogout by remember{mutableStateOf(false)}
+        var sleepMenu by remember{mutableStateOf(false)}
+        var clearRecent by remember{mutableStateOf(false)}
         var songActions by remember{mutableStateOf(false)}
         var actionSong by remember{mutableStateOf<JSONObject?>(null)}
         LaunchedEffect(m.mid){songActions=false}
@@ -79,11 +81,11 @@ class MainActivity:ComponentActivity(){
         val expansion = remember { Animatable(0f) }
         LaunchedEffect(player) { expansion.animateTo(if (player) 1f else 0f, spring(dampingRatio=0.86f, stiffness=420f)) }
         BoxWithConstraints(Modifier.fillMaxSize().background(c.surface)) {
-            MusicShell(m,lists,Modifier.onGloballyPositioned { playerOrigin=it.boundsInRoot() },{player=true},{queue=true},{confirmLogout=true})
+            MusicShell(m,lists,Modifier.onGloballyPositioned { playerOrigin=it.boundsInRoot() },{player=true},{queue=true},{confirmLogout=true},{sleepMenu=true},{clearRecent=true})
             if(player || expansion.value > 0f) {
                 val density=LocalDensity.current
                 val width=with(density){maxWidth.toPx()};val height=with(density){maxHeight.toPx()}
-                MusicPlayer(m,{player=false},{queue=true},{qualityMenu=true},{actionSong=m.currentSong()?.let{JSONObject(it.toString())};songActions=true},Modifier.graphicsLayer {
+                MusicPlayer(m,{player=false},{queue=true},{qualityMenu=true},{sleepMenu=true},{actionSong=m.currentSong()?.let{JSONObject(it.toString())};songActions=true},Modifier.graphicsLayer {
                     val p=expansion.value.coerceIn(0f,1f)
                     val origin=playerOrigin.takeIf{it.width>0f}?:Rect(0f,height*0.85f,width,height)
                     transformOrigin=TransformOrigin(0f,0f)
@@ -95,6 +97,13 @@ class MainActivity:ComponentActivity(){
             }
         }
         Scaffold(Modifier.fillMaxSize(),containerColor=Color.Transparent,contentWindowInsets=WindowInsets(0,0,0,0)){
+            SleepTimerSheet(m,sleepMenu,{sleepMenu=false})
+            OverlayDialog(show=clearRecent,title=stringResource(R.string.clear_recent),summary=stringResource(R.string.clear_recent_summary),onDismissRequest={clearRecent=false}){
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(20.dp)){
+                    TextButton(stringResource(R.string.cancel),{clearRecent=false},Modifier.weight(1f))
+                    TextButton(stringResource(R.string.clear_history),{m.clearRecentPlays();clearRecent=false},Modifier.weight(1f))
+                }
+            }
             SongActions(m,actionSong,songActions,{songActions=false})
             OverlayDialog(show=m.qrOpen,title=stringResource(R.string.login_qq),summary=m.qrStatus,onDismissRequest=m::dismissLogin){
                 Column(Modifier.fillMaxWidth(),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(16.dp)){
@@ -113,7 +122,7 @@ class MainActivity:ComponentActivity(){
     }
 }
 
-@Composable private fun MusicShell(m:MusicState,states:MutableMap<String,LazyListState>,playerSurface:Modifier,openPlayer:()->Unit,showQueue:()->Unit,logout:()->Unit){
+@Composable private fun MusicShell(m:MusicState,states:MutableMap<String,LazyListState>,playerSurface:Modifier,openPlayer:()->Unit,showQueue:()->Unit,logout:()->Unit,showSleep:()->Unit,clearRecent:()->Unit){
     val c=MiuixTheme.colorScheme
     val scroll=MiuixScrollBehavior()
     val list=states.getOrPut(m.page){LazyListState()}
@@ -128,10 +137,8 @@ class MainActivity:ComponentActivity(){
     }
     // Opaque semantic chrome is the conservative fallback while static capture and
     // continuous recording disagree on this device. Keep this separate from lyric blur.
-    val title=when(m.page){"mine"->stringResource(R.string.my_music);"search"->stringResource(R.string.search);"songs"->m.detailTitle;else->if(m.page in SETTINGS_PAGES)stringResource(settingsTitle(m.page))else "Auralis"}
+    val title=when(m.page){"mine"->stringResource(R.string.my_music);"recent"->stringResource(R.string.recent_plays);"search"->stringResource(R.string.search);"songs"->m.detailTitle;else->if(m.page in SETTINGS_PAGES)stringResource(settingsTitle(m.page))else "Auralis"}
     val secondary=m.page!="home"&&m.page!="mine"
-    val likedLabel=stringResource(R.string.liked_music)
-    val favoritesLabel=stringResource(R.string.local_favorites)
     Scaffold(containerColor=c.surface,topBar={
         Box(Modifier.background(c.surface)){
             TopAppBar(title=title,expandable=LocalConfiguration.current.screenWidthDp<840,color=Color.Transparent,scrollBehavior=scroll,
@@ -161,34 +168,10 @@ class MainActivity:ComponentActivity(){
             when(m.page){
                 "home"->homeDiscovery(m,showQueue)
                 "search"->searchDiscovery(m)
-                "mine"->{
-                    item("profile"){Card(Modifier.padding(horizontal=12.dp,vertical=8.dp).fillMaxWidth()){
-                        Row(Modifier.padding(20.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(16.dp)){
-                            Artwork(m.avatar,stringResource(R.string.avatar),Modifier.size(64.dp).clip(CircleShape),true)
-                            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)){
-                                Text(if(m.loggedIn)m.profile.optString("nickname").takeIf{it.isNotBlank()&&it!="null"}?:stringResource(R.string.qq_user)else stringResource(R.string.music_with_you),style=MiuixTheme.textStyles.title3)
-                                Text(if(m.loggedIn)"QQ ${m.uin}"else stringResource(R.string.login_library_summary),style=MiuixTheme.textStyles.footnote1,color=c.onSurfaceVariantSummary)
-                            }
-                        }
-                    }}
-                    item("collections"){SmallTitle(stringResource(R.string.collections));Card(Modifier.padding(horizontal=12.dp).fillMaxWidth()){
-                        ArrowPreference(title=stringResource(R.string.liked_music),summary=stringResource(R.string.song_count,m.library.optJSONArray("likes")?.length()?:0),startAction={Icon(MiuixIcons.Favorites,null)},onClick={if(m.loggedIn)m.openSongs(m.library.optJSONArray("likes")?.objects().orEmpty(),likedLabel)else m.login()})
-                        ArrowPreference(title=stringResource(R.string.local_favorites),summary=stringResource(R.string.song_count,m.favorites.size),startAction={Icon(MiuixIcons.Music,null)},onClick={m.openSongs(m.favorites,favoritesLabel)})
-                    }}
-                    item("my-playlists-header"){SectionHeader(stringResource(R.string.my_playlists),m::refreshLibrary)}
-                    if(!m.loggedIn)item("mine-login"){TextButton(stringResource(R.string.login_qq),m::login,Modifier.padding(12.dp).fillMaxWidth())}
-                    itemsIndexed(m.library.optJSONArray("playlists")?.objects().orEmpty(),key={i,s->"playlist:${s.optLong("id")}:$i"}){_,song->
-                        Card(Modifier.padding(horizontal=12.dp,vertical=4.dp).fillMaxWidth(),onClick={m.playlist(song.optLong("id"),song.optLong("dirid"),song.optString("title"))},pressFeedbackType=PressFeedbackType.Sink){
-                            Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)){
-                                Artwork(song.optString("cover"),song.optString("title"),Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)))
-                                Column(Modifier.weight(1f)){Text(song.optString("title"),maxLines=1,overflow=TextOverflow.Ellipsis);Text(stringResource(R.string.song_count,song.optInt("count")),style=MiuixTheme.textStyles.footnote1,color=c.onSurfaceVariantSummary)}
-                                Icon(MiuixIcons.ChevronForward,null)
-                            }
-                        }
-                    }
-                }
+                "mine"->musicLibrary(m,showSleep)
+                "recent"->recentListening(m,clearRecent)
                 "songs"->{
-                    item("playlist-count"){SmallTitle(stringResource(R.string.playlist_count,m.tracks.size));TextButton(stringResource(R.string.play_all),{m.play(m.tracks,0)},Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=8.dp),enabled=m.tracks.isNotEmpty())}
+                    item("playlist-count"){PlaylistOverview(m)}
                     if(m.tracks.isEmpty())item("songs-empty"){EmptyMessage(stringResource(R.string.no_songs),stringResource(R.string.retry_later))}
                     itemsIndexed(m.tracks,key={i,s->"song:${s.optString("mid")}:$i"}){i,song->SongRow(song,playingSong(m,song)){m.play(m.tracks,i)}}
                 }
@@ -291,46 +274,8 @@ internal fun playingSong(m:MusicState,song:JSONObject)=m.queue.getOrNull(PlayerS
         }
     }
 }
-@Composable private fun MusicPlayer(m:MusicState,close:()->Unit,queue:()->Unit,openQuality:()->Unit,openActions:()->Unit,modifier:Modifier){
-    val c=MiuixTheme.colorScheme
-    val pager=rememberPagerState(initialPage=1,pageCount={3})
-    Scaffold(modifier.fillMaxSize(),containerColor=c.surface,
-        topBar={SmallTopAppBar(modifier=Modifier.graphicsLayer{compositingStrategy=CompositingStrategy.Offscreen},title=stringResource(R.string.now_playing),navigationIcon={IconButton(onClick=close){TransportGlyph("down",stringResource(R.string.collapse_player))}},actions={IconButton(onClick=queue){Icon(MiuixIcons.Playlist,stringResource(R.string.play_queue),tint=c.onSurface)}})},
-        bottomBar={Column(Modifier.fillMaxWidth().graphicsLayer{compositingStrategy=CompositingStrategy.Offscreen}.navigationBarsPadding().padding(horizontal=24.dp,vertical=10.dp)){
-            if(pager.currentPage!=2)ThinSeekBar(m.position,m.duration,{m.command("SEEK","position",it)},Modifier.fillMaxWidth())
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Text(formatTime(m.position),style=MiuixTheme.textStyles.footnote2,color=c.onSurfaceVariantSummary);Text(formatTime(m.duration),style=MiuixTheme.textStyles.footnote2,color=c.onSurfaceVariantSummary)}
-            Row(Modifier.fillMaxWidth().padding(top=10.dp),horizontalArrangement=Arrangement.SpaceEvenly,verticalAlignment=Alignment.CenterVertically){
-                IconButton(onClick=m::cyclePlaybackMode,minWidth=48.dp,minHeight=48.dp){TransportGlyph(when(m.playbackMode){"SHUFFLE"->"shuffle";"LOOP"->"repeat";"SINGLE"->"repeat_one";else->"order"},stringResource(playbackLabel(m.playbackMode)),if(m.playbackMode=="ORDER")c.onSurface else c.primary)}
-                IconButton(onClick={m.command("PREVIOUS")}){TransportGlyph("previous",stringResource(R.string.previous))}
-                IconButton(onClick={m.command(if(m.playing)"PAUSE"else"RESUME")},backgroundColor=c.primary,minWidth=68.dp,minHeight=68.dp,cornerRadius=20.dp){Icon(if(m.playing)MiuixIcons.Pause else MiuixIcons.Play,if(m.playing)stringResource(R.string.pause)else stringResource(R.string.play),tint=c.onPrimary,modifier=Modifier.size(28.dp))}
-                IconButton(onClick={m.command("NEXT")}){TransportGlyph("next",stringResource(R.string.next))}
-                IconButton(onClick=queue){Icon(MiuixIcons.Playlist,stringResource(R.string.play_queue))}
-            }
-            if(pager.currentPage==2)ThinSeekBar(m.position,m.duration,{m.command("SEEK","position",it)},Modifier.fillMaxWidth(),framed=true)
-        }}){padding->
-        Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)){
-            Row(Modifier.padding(horizontal=28.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)){
-                if(pager.currentPage!=1)Artwork(m.cover,m.title,Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)))
-                Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)){
-                    Text(m.title.ifBlank{stringResource(R.string.not_playing)},style=MiuixTheme.textStyles.title3,maxLines=1,overflow=TextOverflow.Ellipsis)
-                    Text(m.artist,style=MiuixTheme.textStyles.footnote1,color=c.onSurfaceVariantSummary,maxLines=1,overflow=TextOverflow.Ellipsis)
-                }
-                TextButton(if(m.qualityPending)stringResource(R.string.quality_switching)else qualityBadge(m.actualQuality,m.qualityDowngraded),openQuality,Modifier.heightIn(min=48.dp))
-                IconButton(onClick=m::toggleFavorite){Icon(if(m.favorite())MiuixIcons.FavoritesFill else MiuixIcons.Favorites,stringResource(R.string.local_favorites),tint=c.onSurface)}
-            }
-            if(m.status.isNotBlank())Text(m.status,Modifier.padding(horizontal=28.dp,vertical=8.dp),style=MiuixTheme.textStyles.footnote1,color=c.onSurfaceVariantSummary)
-            HorizontalPager(pager,Modifier.weight(1f).fillMaxWidth()){page->
-                when(page){
-                    0->SongInformation(m)
-                    1->Box(Modifier.fillMaxSize().padding(28.dp),contentAlignment=Alignment.Center){Artwork(m.cover,m.title,Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(20.dp)).clickable(onClickLabel=stringResource(R.string.song_actions),onClick=openActions))}
-                    else->SynchronizedLyrics(m,pager.currentPage==2)
-                }
-            }
-        }
-    }
-}
-private fun formatTime(ms:Int)="%02d:%02d".format(ms.coerceAtLeast(0)/60000,ms.coerceAtLeast(0)/1000%60)
-@Composable private fun TransportGlyph(kind:String,label:String,tint:Color=MiuixTheme.colorScheme.onSurface){
+internal fun formatTime(ms:Int)="%02d:%02d".format(ms.coerceAtLeast(0)/60000,ms.coerceAtLeast(0)/1000%60)
+@Composable internal fun TransportGlyph(kind:String,label:String,tint:Color=MiuixTheme.colorScheme.onSurface){
     val color=tint.toArgb()
     Canvas(Modifier.size(24.dp).semantics{contentDescription=label}){val icon=MusicIcon(kind,color);icon.setBounds(0,0,size.width.toInt(),size.height.toInt());icon.draw(drawContext.canvas.nativeCanvas)}
 }

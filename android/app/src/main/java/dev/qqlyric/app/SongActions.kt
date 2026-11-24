@@ -21,12 +21,13 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
     LaunchedEffect(show){if(show){destination="menu";m.collectionMessage="";if(m.loggedIn&&m.library.length()==0)m.refreshLibrary()}}
     val half=LocalConfiguration.current.screenHeightDp.dp*0.5f
     val loginRequired=stringResource(R.string.login_library_summary)
-    OverlayBottomSheet(show=show,title=stringResource(when(destination){"quality"->R.string.audio_quality;"playlists"->R.string.add_to_playlist;else->R.string.song_actions}),
+    OverlayBottomSheet(show=show,title=stringResource(when(destination){"timer"->R.string.sleep_timer;"quality"->R.string.audio_quality;"playlists"->R.string.add_to_playlist;else->R.string.song_actions}),
         onDismissRequest=onClose,modifier=Modifier.heightIn(max=half),
         startAction={if(destination!="menu")TextButton(stringResource(R.string.back),{destination="menu"})}){
         AnimatedContent(destination,label="song actions destination"){page->
             Column(Modifier.fillMaxWidth().height((half-100.dp).coerceAtLeast(180.dp)).verticalScroll(rememberScrollState())){
                 if(page=="quality")QualityChoices(m)
+                else if(page=="timer")SleepTimerChoices(m)
                 else {
                     song?.let{
                         Text(it.optString("title"),Modifier.padding(horizontal=20.dp,vertical=8.dp),style=MiuixTheme.textStyles.title3,maxLines=2,overflow=TextOverflow.Ellipsis)
@@ -35,6 +36,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
                     if(m.collectionMessage.isNotBlank())Text(m.collectionMessage,Modifier.padding(horizontal=20.dp,vertical=12.dp),color=MiuixTheme.colorScheme.primary)
                     if(page=="menu"){
                         ArrowPreference(title=stringResource(R.string.audio_quality),summary=qualityBadge(m.actualQuality,m.qualityDowngraded),onClick={destination="quality"})
+                        ArrowPreference(title=stringResource(R.string.sleep_timer),summary=sleepTimerSummary(m),onClick={destination="timer"})
                         ArrowPreference(title=stringResource(if(song!=null&&m.cloudLiked(song))R.string.already_liked else R.string.add_to_likes),summary=stringResource(R.string.cloud_likes_summary),enabled=song!=null&&!m.collectionBusy,onClick={song?.let{m.addCloudSong(it,201)}})
                         ArrowPreference(title=stringResource(R.string.add_to_playlist),summary=stringResource(R.string.owned_playlist_summary),enabled=song!=null&&!m.collectionBusy,onClick={destination="playlists";if(m.loggedIn)m.refreshLibrary()else m.collectionMessage=loginRequired})
                     }else{

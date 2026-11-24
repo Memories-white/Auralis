@@ -24,7 +24,8 @@ import java.util.concurrent.Executors
 data class PlaybackSnapshot(
     val mid:String="", val title:String="", val artist:String="", val artwork:String="",
     val playing:Boolean=false, val position:Int=0, val duration:Int=0,
-    val lyric:String="", val translation:String="", val error:String="", val token:String="",val quality:String="",val qualityPending:Boolean=false,val downgraded:Boolean=false
+    val lyric:String="", val translation:String="", val error:String="", val token:String="",val quality:String="",val qualityPending:Boolean=false,val downgraded:Boolean=false,
+    val sleepRemainingSeconds:Int=0,val sleepAfterTrack:Boolean=false,val sleepFinished:Boolean=false,val sleepMinutes:Int=0
 )
 
 class PlayerService : Service() {
@@ -46,7 +47,9 @@ class PlayerService : Service() {
     private val ui = Handler(Looper.getMainLooper())
     private val pulse = object : Runnable {
         override fun run() {
+            expireSleepTimer()
             if (playing) { positionMs = runCatching { player?.currentPosition }.getOrNull() ?: positionMs;updateSnapshot() }
+            else updateSnapshot()
             ui.postDelayed(this, if(playing)50 else 250)
         }
     }
@@ -69,6 +72,11 @@ class PlayerService : Service() {
     private var qualityPending=false
     private var downgraded=false
     private var skipPending=false
+    private val sleepTimer=SleepTimer()
+    private var sleepFinished=false
+    private var historyToken=""
+    private var selectionPending=false
+    private var selectionInterruptedBySleep=false
 
     override fun onCreate() {
         super.onCreate()
@@ -101,10 +109,21 @@ class PlayerService : Service() {
                 account = JSONObject(intent.getStringExtra("session") ?: "{}")
                 currentIndex = intent.getIntExtra("index", -1)
                 order.reset(queue.length(),currentIndex)
-                play(url)
+                val autoPlay=!selectionInterruptedBySleep
+                selectionPending=false;selectionInterruptedBySleep=false
+                if(autoPlay)sleepFinished=false
+                play(url,autoPlay=autoPlay)
             }
             "QUALITY" -> changeQuality(intent.getStringExtra("quality")?:"auto",intent.getStringExtra("fallback")!="false")
-            "SELECT" -> {generation++;if(skipPending)order.reset(queue.length(),currentIndex);qualityPending=false;skipPending=false;pause()}
+            "SELECT" -> {selectionPending=true;selectionInterruptedBySleep=false;generation++;if(skipPending)order.reset(queue.length(),currentIndex);qualityPending=false;skipPending=false;pause()}
+            "SLEEP" -> {
+                when(val value=intent.getIntExtra("minutes",0)){
+                    -1->sleepTimer.setAfterTrack()
+                    in 1..90->sleepTimer.setMinutes(value,SystemClock.elapsedRealtime())
+                    else->sleepTimer.clear()
+                }
+                sleepFinished=false;publish()
+            }
             "PAUSE" -> pause()
             "RESUME" -> resume()
             "STOP" -> stopPlayback()
@@ -127,6 +146,7 @@ class PlayerService : Service() {
     }
 
     private fun play(url:String,startPosition:Int=0,autoPlay:Boolean=true) {
+        if(autoPlay)sleepFinished=false
         playbackError=""
         player?.release()
         playing = false;prepared=false;loading=true;wantPlay=autoPlay;positionMs=startPosition;artwork=null
@@ -135,12 +155,13 @@ class PlayerService : Service() {
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
             setOnPreparedListener { if(player===it){
                 prepared=true
+                expireSleepTimer()
                 if(startPosition>0){loading=true;it.seekTo(startPosition.coerceAtMost((it.duration-1).coerceAtLeast(0)))}
-                else{loading=false;if(wantPlay){it.start();playing=true}}
+                else{loading=false;if(wantPlay){it.start();playing=true;recordListening()}}
                 publish()
             } }
-            setOnSeekCompleteListener{if(player===it){positionMs=it.currentPosition;if(loading){loading=false;if(wantPlay){it.start();playing=true}};publish()}}
-            setOnCompletionListener { if(player===it){playing=false;publish();skip(1,true)} }
+            setOnSeekCompleteListener{if(player===it){positionMs=it.currentPosition;expireSleepTimer();if(loading){loading=false;if(wantPlay){it.start();playing=true;recordListening()}};publish()}}
+            setOnCompletionListener { if(player===it){playing=false;if(sleepTimer.consumeTrackEnd()){finishSleep()}else{publish();skip(1,true)}} }
             setOnErrorListener { failedPlayer, what, extra -> if(player!==failedPlayer)return@setOnErrorListener true;playbackError="音频加载失败（$what / $extra），请重试或切换歌曲"; prepared=false;loading=false;playing = false; publish(); true }
             setDataSource(this@PlayerService, android.net.Uri.parse(url), mapOf("Referer" to "https://y.qq.com/", "User-Agent" to "Mozilla/5.0"))
             prepareAsync()
@@ -156,11 +177,26 @@ class PlayerService : Service() {
     }
 
     private fun pause() { wantPlay=false;if(prepared && playing)player?.pause();playing=false;publish() }
-    private fun resume() { wantPlay=true;if(prepared&&!loading){player?.start();playing=true};publish() }
+    private fun resume() { if(expireSleepTimer())return;sleepFinished=false;wantPlay=true;if(prepared&&!loading){player?.start();playing=true;recordListening()};publish() }
     private fun seek(position:Int){if(prepared){player?.seekTo(position.coerceIn(0,durationMs));positionMs=position};publish()}
-    private fun stopPlayback() { generation++;actualQuality="";qualityPending=false;skipPending=false;downgraded=false;player?.release(); player = null;song=JSONObject();lyric="";translation="";currentArtwork="";currentIndex=-1;positionMs=0;playbackError="";prepared=false;loading=false;playing=false;publish();stopForeground(STOP_FOREGROUND_REMOVE);stopSelf() }
+    private fun stopPlayback() { sleepTimer.clear();sleepFinished=false;generation++;actualQuality="";qualityPending=false;skipPending=false;downgraded=false;player?.release(); player = null;song=JSONObject();lyric="";translation="";currentArtwork="";currentIndex=-1;positionMs=0;playbackError="";prepared=false;loading=false;playing=false;publish();stopForeground(STOP_FOREGROUND_REMOVE);stopSelf() }
+
+    private fun recordListening(){
+        if(historyToken!=playToken&&playing){ListeningHistory.record(this,song);historyToken=playToken}
+    }
+    private fun expireSleepTimer():Boolean{
+        if(!sleepTimer.consumeDeadline(SystemClock.elapsedRealtime()))return false
+        finishSleep();return true
+    }
+    private fun finishSleep(){
+        generation++;if(skipPending)order.reset(queue.length(),currentIndex)
+        skipPending=false;qualityPending=false;sleepFinished=true
+        if(selectionPending)selectionInterruptedBySleep=true
+        pause()
+    }
 
     private fun skip(offset:Int,automatic:Boolean=false){
+        if(expireSleepTimer())return
         val next=order.step(offset,automatic)
         if(BuildConfig.DEBUG)android.util.Log.d("AuralisPlayback","step direction=$offset automatic=$automatic from=$currentIndex target=$next generation=$generation")
         if(next<0){if(automatic){playing=false;publish()};return}
@@ -211,7 +247,7 @@ class PlayerService : Service() {
         }
     }
 
-    private fun updateSnapshot(){snapshot=PlaybackSnapshot(song.optString("mid"),currentTitle,currentArtist,currentArtwork,playing,positionMs,durationMs,lyric,translation,playbackError,playToken,actualQuality,qualityPending,downgraded)}
+    private fun updateSnapshot(){snapshot=PlaybackSnapshot(song.optString("mid"),currentTitle,currentArtist,currentArtwork,playing,positionMs,durationMs,lyric,translation,playbackError,playToken,actualQuality,qualityPending,downgraded,((sleepTimer.remaining(SystemClock.elapsedRealtime())+999)/1000).toInt(),sleepTimer.isAfterTrack,sleepFinished,sleepTimer.minutes)}
 
     private fun publish() {
         val duration = (if(prepared)player?.duration?.toLong() else null)?.takeIf { it > 0 } ?: song.optLong("duration") * 1000

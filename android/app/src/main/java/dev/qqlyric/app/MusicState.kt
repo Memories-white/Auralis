@@ -58,11 +58,19 @@ class MusicState(private val context:Context){
     var page by mutableStateOf("home")
     var parentPage="home"
     var detailTitle by mutableStateOf("")
+    var detailCover by mutableStateOf("")
+    var recentPlays by mutableStateOf(ListeningHistory.read(context))
+    var sleepRemainingSeconds by mutableIntStateOf(0)
+    var sleepAfterTrack by mutableStateOf(false)
+    var sleepFinished by mutableStateOf(false)
+    var sleepMinutes by mutableIntStateOf(0)
+    private val historyListener=android.content.SharedPreferences.OnSharedPreferenceChangeListener { _,key->if(key==ListeningHistory.KEY)recentPlays=ListeningHistory.read(context) }
     var searchText by mutableStateOf("")
     var searchResults by mutableStateOf(emptyList<JSONObject>())
     var searchedQuery by mutableStateOf("")
     var searchHistory by mutableStateOf(JSONArray(prefs.getString("search_history","[]")).let{a->List(a.length()){a.optString(it)}.filter{it.isNotBlank()}.take(8)})
     var status by mutableStateOf("")
+    var playbackStatus by mutableStateOf("")
     var busy by mutableStateOf(false)
     var home by mutableStateOf(JSONObject())
     var library by mutableStateOf(JSONObject())
@@ -87,7 +95,7 @@ class MusicState(private val context:Context){
     val avatar get()=profile.optString("avatar").takeIf{it.startsWith("http")}?.replace("http://","https://")
         ?: uin.takeIf{it.matches(Regex("[0-9]{5,11}"))}?.let{"https://q1.qlogo.cn/g?b=qq&nk=$it&s=160"} ?: ""
     private var alive=true
-    init{prefs.edit().putString("ui_style","MIUIX").apply();refreshHome();if(loggedIn)refreshProfile()}
+    init{prefs.registerOnSharedPreferenceChangeListener(historyListener);prefs.edit().putString("ui_style","MIUIX").apply();refreshHome();if(loggedIn)refreshProfile()}
     private fun call(name:String,args:JSONObject=JSONObject(),done:(JSONObject)->Unit){
         val expected=epoch
         (if(name=="recommend")feedWorker else worker).execute{
@@ -98,9 +106,13 @@ class MusicState(private val context:Context){
     private fun failed(result:JSONObject):Boolean{
         if(result.optBoolean("ok"))return false
         busy=false
-        val text=result.optString("error",context.getString(R.string.request_retry))
-        status=if(text.contains("resolve",true)||text.contains("lookup address",true))context.getString(R.string.network_retry)else text
+        status=displayError(result.optString("error",context.getString(R.string.request_retry)))
         return true
+    }
+    private fun displayError(text:String)=when{
+        text.contains("所选音质未返回可用音源")->context.getString(R.string.playback_unavailable)
+        text.contains("resolve",true)||text.contains("lookup address",true)||text.contains("无法解析")->context.getString(R.string.network_retry)
+        else->text
     }
     fun refreshHome(){
         if(!loggedIn){status=context.getString(R.string.login_recommendations);return}
@@ -144,17 +156,17 @@ class MusicState(private val context:Context){
         if(destination=="mine"&&loggedIn&&library.length()==0)refreshLibrary()
     }
     fun back(){playlistGeneration++;searchGeneration++;page=if(backStack.isNotEmpty())backStack.removeAt(backStack.lastIndex)else "home";status="";busy=false}
-    fun openSongs(songs:List<JSONObject>,label:String){if(page!="songs")parentPage=page;detailTitle=label;tracks=songs;detailRevision++;navigate("songs")}
+    fun openSongs(songs:List<JSONObject>,label:String,cover:String=""){if(page!="songs")parentPage=page;detailTitle=label;detailCover=cover.ifBlank{songs.firstOrNull()?.artwork().orEmpty()};tracks=songs;detailRevision++;navigate("songs")}
     fun daily(){
         val songs=home.optJSONArray("daily")?.objects().orEmpty()
         if(songs.isNotEmpty())openSongs(songs,context.getString(R.string.daily_mix))
         else if(!loggedIn)login()else if(home.optLong("dailyId")>0)playlist(home.optLong("dailyId"),0,context.getString(R.string.daily_mix))else refreshHome()
     }
-    fun playlist(id:Long,dirid:Long,label:String){
+    fun playlist(id:Long,dirid:Long,label:String,cover:String=""){
         val request=++playlistGeneration;busy=true;status=context.getString(R.string.loading_playlist)
         call("playlist",JSONObject().put("id",id).put("dirid",dirid).put("session",session)){result->
             if(request!=playlistGeneration)return@call
-            busy=false;if(!failed(result)){openSongs(result.getJSONArray("data").objects(),label);status=""}
+            busy=false;if(!failed(result)){openSongs(result.getJSONArray("data").objects(),label,cover);status=""}
         }
     }
     fun search(){
@@ -195,14 +207,16 @@ class MusicState(private val context:Context){
         if(index !in songs.indices)return
         val preferred=audioQuality;val fallback=qualityFallback
         val song=songs[index];val request=++playGeneration;val token=java.util.UUID.randomUUID().toString();pendingToken=token;pendingMid=song.optString("mid");mid=pendingMid?:"";title=song.optString("title");artist=song.optString("artist");cover=song.artwork();lyrics="";translation="";actualQuality="";qualityPending=false;qualityDowngraded=false;position=0;duration=song.optInt("duration")*1000;playing=false;status=context.getString(R.string.loading_song)
+        playbackStatus=status
         if(PlayerService.snapshot.mid.isNotBlank())command("SELECT")
         call("play_url",JSONObject().put("song",song).put("session",session).put("quality",preferred).put("fallback",fallback)){result->
             if(request!=playGeneration)return@call
             if(preferred!=audioQuality||fallback!=qualityFallback){play(songs,index);return@call}
-            if(failed(result)){pendingMid=null;pendingToken=null;return@call}
+            if(failed(result)){pendingMid=null;pendingToken=null;playbackStatus=status;return@call}
             queue=songs.toList();prefs.edit().putString("active_queue",JSONArray(songs).toString()).apply()
             command("PLAY","quality",result.getJSONObject("data").optString("quality"),"downgraded",result.getJSONObject("data").optBoolean("downgraded").toString(),"token",token,"url",result.getJSONObject("data").getString("url"),"song",song.toString(),"lyric","","queue",JSONArray(songs).toString(),"session",session.toString(),"index",index)
             title=song.optString("title");artist=song.optString("artist");cover=song.artwork();status=""
+            playbackStatus=""
             call("lyrics",JSONObject().put("mid",song.optString("mid")).put("id",song.optLong("id")).put("session",session)){lyricResult->
                 if(request==playGeneration&&lyricResult.optBoolean("ok")){
                     val data=lyricResult.getJSONObject("data");command("LYRIC","token",token,"mid",song.optString("mid"),"lyric",data.optString("lyric"),"translation",data.optString("translation"))
@@ -217,14 +231,24 @@ class MusicState(private val context:Context){
     }
     fun sample(){
         val state=PlayerService.snapshot
+        sleepRemainingSeconds=state.sleepRemainingSeconds;sleepAfterTrack=state.sleepAfterTrack;sleepFinished=state.sleepFinished;sleepMinutes=state.sleepMinutes
         if(pendingToken!=null){if(state.token!=pendingToken)return else {pendingMid=null;pendingToken=null}}
         mid=state.mid;title=state.title;artist=state.artist;cover=state.artwork
         playing=state.playing;position=state.position;duration=state.duration
         lyrics=state.lyric;translation=state.translation
         actualQuality=state.quality;qualityPending=state.qualityPending;qualityDowngraded=state.downgraded
-        if(state.error.isNotBlank())status=state.error else if(lastServiceError.isNotBlank()&&status==lastServiceError)status=""
-        lastServiceError=state.error
+        val serviceError=displayError(state.error)
+        if(serviceError.isNotBlank()){status=serviceError;playbackStatus=serviceError}else if(lastServiceError.isNotBlank()){
+            if(status==lastServiceError)status=""
+            if(playbackStatus==lastServiceError)playbackStatus=""
+        }
+        lastServiceError=serviceError
     }
+    fun setSleepTimer(minutes:Int){
+        if(mid.isBlank())return
+        command("SLEEP","minutes",minutes)
+    }
+    fun clearRecentPlays(){ListeningHistory.clear(context);recentPlays=emptyList()}
     fun chooseAudioQuality(value:String){
         if(value !in listOf("auto","sq","hq","standard"))return
         audioQuality=value;prefs.edit().putString("audio_quality",value).apply();applyQuality()
@@ -264,11 +288,19 @@ class MusicState(private val context:Context){
             qrBitmap=BitmapFactory.decodeByteArray(bytes,0,bytes.size);qrStatus=context.getString(R.string.scan_qq);poll(generation,data.getString("qrsig"))
         }
     }
-    private fun poll(generation:Int,sig:String){
+    private fun poll(generation:Int,sig:String,networkRetries:Int=0){
         if(generation!=loginGeneration||!qrOpen)return
         call("qr_poll",JSONObject().put("qrsig",sig)){result->
             if(generation!=loginGeneration||!qrOpen)return@call
-            if(failed(result)){qrStatus=status;return@call}
+            if(!result.optBoolean("ok")){
+                val error=result.optString("error",context.getString(R.string.request_retry))
+                val transient=error.contains("无法解析")||error.contains("resolve",true)||error.contains("lookup address",true)||error.contains("超时")||error.contains("timeout",true)
+                if(transient&&networkRetries<3){
+                    qrStatus=context.getString(R.string.qr_network_retry)
+                    ui.postDelayed({poll(generation,sig,networkRetries+1)},2000L*(networkRetries+1))
+                }else{status=displayError(error);qrStatus=status}
+                return@call
+            }
             val data=result.getJSONObject("data")
             when(data.optString("status")){
                 "success"->{session=data.getJSONObject("session");secure.save(session.toString());loggedIn=true;dismissLogin();navigate("mine");refreshLibrary();refreshProfile();refreshHome()}
@@ -279,5 +311,5 @@ class MusicState(private val context:Context){
     }
     fun dismissLogin(){loginGeneration++;qrOpen=false}
     fun logout(){homeGeneration++;feedGeneration++;discoverySongs=emptyList();discoveryLoading=false;discoveryMore=true;discoveryError="";collectionBusy=false;collectionMessage="";epoch++;loginGeneration++;playGeneration++;pendingMid=null;pendingToken=null;backStack.clear();secure.clear();session=JSONObject();profile=JSONObject();loggedIn=false;home=JSONObject();library=JSONObject();page="home";status=context.getString(R.string.logged_out);command("STOP")}
-    fun close(){alive=false;loginGeneration++;worker.shutdownNow();feedWorker.shutdownNow();ui.removeCallbacksAndMessages(null)}
+    fun close(){prefs.unregisterOnSharedPreferenceChangeListener(historyListener);alive=false;loginGeneration++;worker.shutdownNow();feedWorker.shutdownNow();ui.removeCallbacksAndMessages(null)}
 }

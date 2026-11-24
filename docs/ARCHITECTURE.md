@@ -10,7 +10,7 @@ flowchart TD
     State --> JNI[RustCore / JNI]
     JNI --> Core[Rust QQ 协议与数据归一化]
     Core --> HTTP[AndroidHttp 系统 HTTPS]
-    HTTP --> QQ[音乐服务服务]
+    HTTP --> QQ[音乐服务]
     State --> Service[PlayerService]
     Service --> Player[Android MediaPlayer]
     Service --> Session[Framework MediaSession]
@@ -31,7 +31,11 @@ Rust 负责请求参数、响应解析、登录状态、曲库、搜索、授权
 | `MusicState.kt` | 页面业务状态、账号、异步结果、队列与偏好 |
 | `MainActivity.kt` | 唯一主题、页面宿主、导航、弹层、歌曲栏与完整播放器 |
 | `DiscoveryContent.kt` | 首页与搜索的列表内容，复用宿主滚动和 inset |
+| `LibraryPages.kt` | 音乐库、最近播放与歌单概览内容，复用宿主列表 |
+| `PlayerScreen.kt` | 封面 / 信息 / 歌词分页、播放器布局与操作入口 |
 | `PlayerService.kt` | 后台播放、媒体会话、音质重载与播放状态快照 |
+| `ListeningHistory.kt` | 有界本机最近播放，仅存歌曲元数据 |
+| `SleepTimer.java` / `TimerControls.kt` | 单调时钟定时状态机与 MIUIX 选择面板 |
 | `SynchronizedLyrics.kt` | 播放定位、手动浏览恢复、逐行位移 / 缩放 / 模糊 |
 | `ThinSeekBar.kt` | 播放进度绘制、拖动、键盘及无障碍控制 |
 | `PlaybackOrder.java` | 顺序、循环和随机遍历 / 历史，不依赖网络 |
@@ -49,6 +53,8 @@ Rust 负责请求参数、响应解析、登录状态、曲库、搜索、授权
 - 系统歌词发布歌曲身份、原文、翻译和播放时间戳；协议层能力与消费端显示策略分开验证。
 - 个性化推荐在独立线程执行，页码单调推进，失败等待重试；云端写入区分服务受理与成员确认。
 - 凭据保存在应用私有存储并加密，图片缓存与收藏等普通偏好分开管理。
+- 最近播放在 MediaPlayer 成功开始后由服务写入，按曲目标识去重、最多 100 首；音质重载及暂停恢复沿用请求标识，避免重复记录。
+- 睡眠定时只由服务持有，以 elapsedRealtime 计算，UI 读取原子快照。到期先使异步切歌 / 音质请求失效再暂停；当前曲目结束模式先于自动下一首判断。定时不跨进程保存。
 
 ## UI 与动效
 

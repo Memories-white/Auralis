@@ -9,7 +9,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed.' }
     $output = Join-Path $projectRoot 'tools\.test-classes'
     New-Item -ItemType Directory -Path $output -Force | Out-Null
-    $tests = @('PlaybackOrder', 'ArtworkDiskStore', 'ArtworkSeed')
+    $tests = @('PlaybackOrder', 'ArtworkDiskStore', 'ArtworkSeed', 'SleepTimer')
     $sources = foreach ($name in $tests) {
         Join-Path $projectRoot "android\app\src\main\java\dev\qqlyric\app\$name.java"
         Join-Path $projectRoot "tools\${name}Test.java"

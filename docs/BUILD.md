@@ -76,13 +76,25 @@ android/app/build/outputs/apk/debug/app-debug.apk
 .\test.ps1 -Offline
 ```
 
-运行 Rust 单元测试，以及独立的 Java 播放顺序、图片磁盘缓存和封面取色检查。这些测试不需要 账号登录，也不会读取真实账号凭据。仅做协议层测试时可运行：
+运行 Rust 单元测试，以及独立的 Java 播放顺序、图片磁盘缓存、封面取色和睡眠定时检查。这些测试不需要账号登录，也不会读取真实账号凭据。仅做协议层测试时可运行：
 
 ```powershell
 cargo test --manifest-path core/Cargo.toml --locked --offline
 ```
 
 这些检查不能替代真实设备上的媒体通知、音质切换、动画或 LyriconProvider 联调。当前验证范围见 [设备验证记录](../design/DEVICE_VALIDATION.md)。
+
+### 本地音频实机集成检查
+
+暂停现有播放并关闭现有睡眠定时后，在已安装同签名主 APK 的调试设备上运行：
+
+```powershell
+.\android\gradlew.bat -p android :app:assembleDebugAndroidTest
+adb install -r -t android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb shell am instrument -w dev.qqlyric.app.test/dev.qqlyric.app.PlaybackSmokeTest
+```
+
+测试 APK 生成两分钟的本地静音 WAV，通过正常播放服务验证成功播放记录、暂停恢复去重、歌曲结束定时优先于循环，以及真实一分钟倒计时暂停，耗时约 70 秒。它临时修改播放状态，完成后恢复原最近播放记录与顺序偏好并停止测试音频；请勿在收听音乐时运行。测试类仅存在于 `androidTest`，不打入主 APK，也不开放额外外部控制入口。
 
 ## 安装与签名
 
