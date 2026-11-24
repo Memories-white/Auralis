@@ -12,7 +12,7 @@
 
 ## 关于 Auralis
 
-UI 与功能预览：[0.3.8-preview](https://github.com/Memories-white/Auralis/releases/tag/v0.3.8-preview)。重新整理音乐库、歌单和封面播放器，新增本机最近播放与睡眠定时。验证范围见[设备记录](design/DEVICE_VALIDATION.md)。稳定版本仍为 0.3.6。
+最新修复预览：[0.3.9-preview](https://github.com/Memories-white/Auralis/releases/tag/v0.3.9-preview)。修复“猜你喜欢”内容为空，并支持关闭重开后恢复歌曲、队列与进度。验证范围见[设备记录](design/DEVICE_VALIDATION.md)。稳定版本仍为 0.3.6。
 
 Auralis 是面向 Android 的音频应用学习项目，使用 **Rust** 探索协议适配与数据处理，使用 **Kotlin / Jetpack Compose** 构建原生界面。界面统一采用 **MIUIX**，用于研究明暗主题、动态配色、同步歌词、后台播放和系统媒体会话。
 
@@ -61,6 +61,15 @@ Auralis 是面向 Android 的音频应用学习项目，使用 **Rust** 探索�
 | **图片缓存** | WebP 磁盘缓存上限 24 MB / 240 项，内存上限 8 MiB，支持过期缓存离线回退 |
 | **系统歌词** | 通过 MediaSession 发布歌词，配合适配版 LyriconProvider 与兼容消费端使用 |
 | **睡眠定时（预览）** | 15 / 30 / 60 / 90 分钟后暂停，或播完当前歌曲后暂停；在播放服务中计时 |
+| **恢复播放（预览）** | 保存最后歌曲、最多 500 首队列及播放进度，重开后默认暂停，点击播放重新获取音源并续播 |
+
+### 0.3.9-preview 修复
+
+- “猜你喜欢”使用专属推荐接口加载真实歌曲，显示歌曲封面和实际数量。
+- 关闭进程后，底部歌曲栏恢复最后歌曲与进度；后台仍在运行时优先显示实际播放会话。
+- 播放中约每 5 秒保存进度，暂停、完成拖动和正常停止时立即保存。首次从旧版升级可用最近播放补回曲目信息，旧版未保存的进度从 0 开始。
+
+[下载修复预览版](https://github.com/Memories-white/Auralis/releases/tag/v0.3.9-preview) · [查看实机验证](design/DEVICE_VALIDATION.md)
 
 ### 0.3.8-preview 新变化
 

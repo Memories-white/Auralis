@@ -23,6 +23,12 @@ class MusicState(private val context:Context){
     private val ui=Handler(Looper.getMainLooper())
     private val secure=SecureStore(context)
     private val prefs=context.getSharedPreferences("library",Context.MODE_PRIVATE)
+    private val playbackPrefs=context.getSharedPreferences(PlaybackStore.PREFS,Context.MODE_PRIVATE)
+    private var savedPlayback=PlaybackStore.read(context)
+    private var savedPlaybackDirty=false
+    private val playbackListener=android.content.SharedPreferences.OnSharedPreferenceChangeListener{_,key->if(key==PlaybackStore.KEY)savedPlaybackDirty=true}
+    private var lastLiveMid=PlayerService.snapshot.mid
+    private var appliedQueueJson=""
     private var session=JSONObject(secure.load()?:"{}")
     private var epoch=0
     private var loginGeneration=0
@@ -43,7 +49,8 @@ class MusicState(private val context:Context){
     private var pendingMid:String?=null
     private var pendingToken:String?=null
     private var lastServiceError=""
-    var mid by mutableStateOf(PlayerService.snapshot.mid)
+    var mid by mutableStateOf(PlayerService.snapshot.mid.ifBlank{savedPlayback?.song?.optString("mid").orEmpty()})
+    var currentIndex by mutableIntStateOf(if(PlayerService.snapshot.mid.isNotBlank())PlayerService.snapshot.index else savedPlayback?.index?:-1)
     var monetEnabled by mutableStateOf(prefs.getBoolean("monet_enabled",false))
     var monetSource by mutableStateOf(prefs.getString("monet_source","wallpaper")?:"wallpaper")
     var monetColor by mutableStateOf(prefs.getString("monet_color","3482FF")?:"3482FF")
@@ -76,26 +83,26 @@ class MusicState(private val context:Context){
     var library by mutableStateOf(JSONObject())
     var tracks by mutableStateOf(emptyList<JSONObject>())
     var favorites by mutableStateOf(JSONArray(prefs.getString("favorites","[]")).objects())
-    var queue by mutableStateOf(JSONArray(prefs.getString("active_queue","[]")).objects())
+    var queue by mutableStateOf(if(PlayerService.snapshot.mid.isNotBlank())runCatching{JSONArray(PlayerService.snapshot.queueJson).objects()}.getOrDefault(emptyList())else savedPlayback?.queue?:runCatching{JSONArray(prefs.getString("active_queue","[]")).objects()}.getOrDefault(emptyList()))
     var loggedIn by mutableStateOf(session.optString("musicKey").isNotBlank())
     var profile by mutableStateOf(session.optJSONObject("profile")?:JSONObject())
     var colorMode by mutableStateOf(prefs.getString("color_mode","system")?:"system")
     var qrOpen by mutableStateOf(false)
     var qrBitmap by mutableStateOf<Bitmap?>(null)
     var qrStatus by mutableStateOf("")
-    var title by mutableStateOf(PlayerService.currentTitle)
-    var artist by mutableStateOf(PlayerService.currentArtist)
-    var cover by mutableStateOf(PlayerService.currentArtwork)
+    var title by mutableStateOf(PlayerService.currentTitle.ifBlank{savedPlayback?.song?.optString("title").orEmpty()})
+    var artist by mutableStateOf(PlayerService.currentArtist.ifBlank{savedPlayback?.song?.optString("artist").orEmpty()})
+    var cover by mutableStateOf(PlayerService.currentArtwork.ifBlank{savedPlayback?.song?.artwork().orEmpty()})
     var playing by mutableStateOf(PlayerService.isPlaying)
-    var position by mutableIntStateOf(0)
-    var duration by mutableIntStateOf(0)
+    var position by mutableIntStateOf(if(PlayerService.snapshot.mid.isNotBlank())PlayerService.snapshot.position else savedPlayback?.position?:0)
+    var duration by mutableIntStateOf(if(PlayerService.snapshot.mid.isNotBlank())PlayerService.snapshot.duration else savedPlayback?.duration?:0)
     var lyrics by mutableStateOf("")
     var translation by mutableStateOf("")
     val uin get()=session.optString("uin")
     val avatar get()=profile.optString("avatar").takeIf{it.startsWith("http")}?.replace("http://","https://")
         ?: uin.takeIf{it.matches(Regex("[0-9]{5,11}"))}?.let{"https://q1.qlogo.cn/g?b=qq&nk=$it&s=160"} ?: ""
     private var alive=true
-    init{prefs.registerOnSharedPreferenceChangeListener(historyListener);prefs.edit().putString("ui_style","MIUIX").apply();refreshHome();if(loggedIn)refreshProfile()}
+    init{prefs.registerOnSharedPreferenceChangeListener(historyListener);playbackPrefs.registerOnSharedPreferenceChangeListener(playbackListener);prefs.edit().putString("ui_style","MIUIX").apply();refreshHome();if(loggedIn)refreshProfile()}
     private fun call(name:String,args:JSONObject=JSONObject(),done:(JSONObject)->Unit){
         val expected=epoch
         (if(name=="recommend")feedWorker else worker).execute{
@@ -169,6 +176,20 @@ class MusicState(private val context:Context){
             busy=false;if(!failed(result)){openSongs(result.getJSONArray("data").objects(),label,cover);status=""}
         }
     }
+    fun recommendedPlaylist(card:JSONObject){
+        val title=card.optString("title")
+        if(card.optString("kind")!="guess"){
+            playlist(card.optLong("id"),card.optLong("dirid"),title,card.optString("cover"));return
+        }
+        if(!loggedIn){login();return}
+        val request=++playlistGeneration;busy=true;status=context.getString(R.string.loading_playlist)
+        val excluded=home.optJSONArray("daily")?.objects().orEmpty().map{it.optString("mid")}
+        call("guess",JSONObject().put("session",session).put("exclude",JSONArray(excluded))){result->
+            if(request!=playlistGeneration)return@call
+            busy=false
+            if(!failed(result)){openSongs(result.getJSONArray("data").objects(),title,card.optString("cover").takeUnless{it=="null"}.orEmpty());status=""}
+        }
+    }
     fun search(){
         val query=searchText.trim();if(query.isEmpty())return
         searchHistory=(listOf(query)+searchHistory.filterNot{it==query}).take(8)
@@ -233,6 +254,19 @@ class MusicState(private val context:Context){
         val state=PlayerService.snapshot
         sleepRemainingSeconds=state.sleepRemainingSeconds;sleepAfterTrack=state.sleepAfterTrack;sleepFinished=state.sleepFinished;sleepMinutes=state.sleepMinutes
         if(pendingToken!=null){if(state.token!=pendingToken)return else {pendingMid=null;pendingToken=null}}
+        if(state.mid.isBlank()){
+            if(lastLiveMid.isNotBlank()||savedPlaybackDirty){savedPlayback=PlaybackStore.read(context);savedPlaybackDirty=false;lastLiveMid="";appliedQueueJson=""}
+            savedPlayback?.let{saved->
+                mid=saved.song.optString("mid");title=saved.song.optString("title");artist=saved.song.optString("artist");cover=saved.song.artwork()
+                queue=saved.queue;currentIndex=saved.index;position=saved.position;duration=saved.duration
+            }?:run{mid="";title="";artist="";cover="";currentIndex=-1;position=0;duration=0}
+            lyrics="";translation=""
+            playing=false;actualQuality="";qualityPending=false;qualityDowngraded=false
+            return
+        }
+        lastLiveMid=state.mid
+        if(appliedQueueJson!=state.queueJson){queue=runCatching{JSONArray(state.queueJson).objects()}.getOrDefault(emptyList());appliedQueueJson=state.queueJson}
+        currentIndex=state.index
         mid=state.mid;title=state.title;artist=state.artist;cover=state.artwork
         playing=state.playing;position=state.position;duration=state.duration
         lyrics=state.lyric;translation=state.translation
@@ -270,10 +304,10 @@ class MusicState(private val context:Context){
         val name=it.optString("title").replace(Regex("\\s+"),"")
         (home.optLong("dailyId")>0&&it.optLong("id")==home.optLong("dailyId"))||name.contains("每日30首")||name.contains("每日三十首")
     }
-    fun favorite():Boolean=if(pendingToken!=null)false else queue.getOrNull(PlayerService.currentIndex)?.let{song->favorites.any{it.optString("mid")==song.optString("mid")}}?:false
+    fun favorite():Boolean=if(pendingToken!=null)false else currentSong()?.let{song->favorites.any{it.optString("mid")==song.optString("mid")}}?:false
     fun toggleFavorite(){
         if(pendingToken!=null)return
-        val song=queue.getOrNull(PlayerService.currentIndex)?:return
+        val song=currentSong()?:return
         favorites=if(favorite())favorites.filterNot{it.optString("mid")==song.optString("mid")}else favorites+song
         prefs.edit().putString("favorites",JSONArray(favorites).toString()).apply()
     }
@@ -311,5 +345,5 @@ class MusicState(private val context:Context){
     }
     fun dismissLogin(){loginGeneration++;qrOpen=false}
     fun logout(){homeGeneration++;feedGeneration++;discoverySongs=emptyList();discoveryLoading=false;discoveryMore=true;discoveryError="";collectionBusy=false;collectionMessage="";epoch++;loginGeneration++;playGeneration++;pendingMid=null;pendingToken=null;backStack.clear();secure.clear();session=JSONObject();profile=JSONObject();loggedIn=false;home=JSONObject();library=JSONObject();page="home";status=context.getString(R.string.logged_out);command("STOP")}
-    fun close(){prefs.unregisterOnSharedPreferenceChangeListener(historyListener);alive=false;loginGeneration++;worker.shutdownNow();feedWorker.shutdownNow();ui.removeCallbacksAndMessages(null)}
+    fun close(){prefs.unregisterOnSharedPreferenceChangeListener(historyListener);playbackPrefs.unregisterOnSharedPreferenceChangeListener(playbackListener);alive=false;loginGeneration++;worker.shutdownNow();feedWorker.shutdownNow();ui.removeCallbacksAndMessages(null)}
 }

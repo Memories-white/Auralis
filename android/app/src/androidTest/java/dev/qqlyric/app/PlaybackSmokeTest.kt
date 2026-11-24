@@ -14,9 +14,11 @@ import java.nio.ByteOrder
 /** Device-only integration checks with generated silence; no network audio or account access. */
 class PlaybackSmokeTest : Instrumentation() {
     private var holdSeconds=0
+    private var mode=""
     override fun onCreate(arguments:Bundle?) {
         super.onCreate(arguments)
         holdSeconds=arguments?.getString("holdSeconds")?.toIntOrNull()?.coerceIn(0,90)?:0
+        mode=arguments?.getString("mode").orEmpty()
         start()
     }
 
@@ -33,10 +35,13 @@ class PlaybackSmokeTest : Instrumentation() {
     private fun status(message:String) { sendStatus(0,Bundle().apply{putString("stream","$message\n")}) }
 
     override fun onStart() {
+        if(mode=="restore"){runPlaybackRestoreChecks();return}
         val context=targetContext
         val prefs=context.getSharedPreferences("library",0)
         val originalHistory=prefs.getString(ListeningHistory.KEY,null)
         val originalMode=prefs.getString("playback_mode","ORDER")?:"ORDER"
+        val playback=context.getSharedPreferences(PlaybackStore.PREFS,0)
+        val originalPlayback=playback.getString(PlaybackStore.KEY,null)
         val audio=File(context.filesDir,"playback-smoke.wav")
         var result=Activity.RESULT_CANCELED
         var touched=false
@@ -100,6 +105,7 @@ class PlaybackSmokeTest : Instrumentation() {
                 command("STOP")
                 runOnMainSync {
                     prefs.edit().apply{if(originalHistory==null)remove(ListeningHistory.KEY)else putString(ListeningHistory.KEY,originalHistory)}.putString("playback_mode",originalMode).commit()
+                    playback.edit().apply{if(originalPlayback==null)remove(PlaybackStore.KEY)else putString(PlaybackStore.KEY,originalPlayback)}.commit()
                 }
             }
             audio.delete()

@@ -1,6 +1,45 @@
 use super::*;
 use std::collections::HashSet;
 
+pub(super) fn recommendation_card(card: &Value) -> Value {
+    let title = field(card, "title");
+    json!({"title":title,"id":card["id"],"cover":card["cover"],
+        "dirid":card["miscellany"]["dirid"],
+        "kind":if title.contains("猜你喜欢") {"guess"} else {"playlist"}})
+}
+
+// This is a radio recommendation, not a disstid accepted by PlaylistDetailRead.
+pub fn guess(input: &Value) -> Result<Value, String> {
+    let session = &input["session"];
+    if field(session, "musicKey").is_empty() {
+        return Err("请先登录音乐服务账号".into());
+    }
+    let mut excluded: HashSet<String> = input["exclude"].as_array().into_iter().flatten()
+        .filter_map(Value::as_str).map(str::to_owned).collect();
+    let mut songs = Vec::new();
+    for _ in 0..3 {
+        let batch = (|| {
+            let root = gateway(json!({"comm":{"uin":field(session,"uin"),"authst":field(session,"musicKey"),"format":"json","ct":19,"cv":1},
+                "guess":{"module":"music.radioProxy.MbTrackRadioSvr","method":"get_radio_track","param":{"id":99,"num":15,"from":0,"scene":0,"song_ids":[]}}}), &session["cookies"])?;
+            if number(&root["code"]).unwrap_or(0) != 0 || number(&root["guess"]["code"]) != Some(0) {
+                return Err("猜你喜欢暂不可用，请刷新或重新登录".to_owned());
+            }
+            let tracks = &root["guess"]["data"]["tracks"];
+            if !tracks.is_array() { return Err("推荐服务未返回歌曲列表，请重试".to_owned()); }
+            Ok(filtered_tracks(tracks, &mut excluded, &HashSet::new()))
+        })();
+        match batch {
+            Ok(items) => songs.extend(items),
+            Err(error) if songs.is_empty() => return Err(error),
+            Err(_) => break,
+        }
+        if songs.len() >= 30 { break; }
+    }
+    if songs.is_empty() { return Err("猜你喜欢暂时没有新歌曲，请稍后刷新".into()); }
+    songs.truncate(30);
+    Ok(json!(songs))
+}
+
 // Only personalized song shelves contain song IDs. Playlist and daily cards must
 // never be passed to TrackInfo as though their IDs were song IDs.
 fn song_ids(data: &Value) -> Vec<u64> {
@@ -149,6 +188,13 @@ fn write_result(root: &Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn guess_card_is_not_a_playlist() {
+        assert_eq!(recommendation_card(&json!({"title":"猜你喜欢-沉浸刷歌","id":99}))["kind"], "guess");
+        let playlist = recommendation_card(&json!({"title":"每日30首","id":123,"miscellany":{"dirid":202}}));
+        assert_eq!(playlist["kind"], "playlist");
+        assert_eq!(playlist["dirid"], 202);
+    }
     #[test]
     fn only_personalized_song_shelves() {
         let card = json!({"v_niche":[{"v_card":[{"id":123},{"id":"123"},{"id":456}]}]});

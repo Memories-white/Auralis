@@ -25,7 +25,8 @@ data class PlaybackSnapshot(
     val mid:String="", val title:String="", val artist:String="", val artwork:String="",
     val playing:Boolean=false, val position:Int=0, val duration:Int=0,
     val lyric:String="", val translation:String="", val error:String="", val token:String="",val quality:String="",val qualityPending:Boolean=false,val downgraded:Boolean=false,
-    val sleepRemainingSeconds:Int=0,val sleepAfterTrack:Boolean=false,val sleepFinished:Boolean=false,val sleepMinutes:Int=0
+    val sleepRemainingSeconds:Int=0,val sleepAfterTrack:Boolean=false,val sleepFinished:Boolean=false,val sleepMinutes:Int=0,
+    val queueJson:String="[]",val index:Int=-1
 )
 
 class PlayerService : Service() {
@@ -50,6 +51,7 @@ class PlayerService : Service() {
             expireSleepTimer()
             if (playing) { positionMs = runCatching { player?.currentPosition }.getOrNull() ?: positionMs;updateSnapshot() }
             else updateSnapshot()
+            if(playing)persistPlayback()
             ui.postDelayed(this, if(playing)50 else 250)
         }
     }
@@ -64,6 +66,7 @@ class PlayerService : Service() {
     private var wantPlay = true
     private var artwork:android.graphics.Bitmap?=null
     private var queue = JSONArray()
+    private var queueJson="[]"
     private var account = JSONObject()
     private val order=PlaybackOrder()
     private var generation=0
@@ -77,6 +80,8 @@ class PlayerService : Service() {
     private var historyToken=""
     private var selectionPending=false
     private var selectionInterruptedBySleep=false
+    private var lastSave=0L
+    private var foreground=false
 
     override fun onCreate() {
         super.onCreate()
@@ -94,6 +99,14 @@ class PlayerService : Service() {
             override fun onSeekTo(pos: Long) { seek(pos.toInt()) }
         })
         session.isActive = true
+        PlaybackStore.read(this)?.let{saved->
+            song=saved.song;queue=JSONArray(saved.queue);queueJson=queue.toString();currentIndex=saved.index
+            positionMs=saved.position;durationMs=saved.duration;currentArtwork=song.artwork();wantPlay=false
+            account=JSONObject(SecureStore(this).load()?:"{}")
+            playToken=java.util.UUID.randomUUID().toString()
+            order.reset(queue.length(),currentIndex)
+            publish()
+        }
         ui.post(pulse)
     }
 
@@ -106,16 +119,17 @@ class PlayerService : Service() {
                 lyric = intent.getStringExtra("lyric") ?: ""
                 translation = intent.getStringExtra("translation") ?: ""
                 queue = JSONArray(intent.getStringExtra("queue") ?: "[]")
+                queueJson=queue.toString()
                 account = JSONObject(intent.getStringExtra("session") ?: "{}")
                 currentIndex = intent.getIntExtra("index", -1)
                 order.reset(queue.length(),currentIndex)
                 val autoPlay=!selectionInterruptedBySleep
                 selectionPending=false;selectionInterruptedBySleep=false
                 if(autoPlay)sleepFinished=false
-                play(url,autoPlay=autoPlay)
+                play(url,startPosition=intent.getIntExtra("position",0).coerceAtLeast(0),autoPlay=autoPlay)
             }
             "QUALITY" -> changeQuality(intent.getStringExtra("quality")?:"auto",intent.getStringExtra("fallback")!="false")
-            "SELECT" -> {selectionPending=true;selectionInterruptedBySleep=false;generation++;if(skipPending)order.reset(queue.length(),currentIndex);qualityPending=false;skipPending=false;pause()}
+            "SELECT" -> {selectionPending=true;selectionInterruptedBySleep=false;generation++;if(skipPending)order.reset(queue.length(),currentIndex);qualityPending=false;skipPending=false;if(player==null)loading=false;pause()}
             "SLEEP" -> {
                 when(val value=intent.getIntExtra("minutes",0)){
                     -1->sleepTimer.setAfterTrack()
@@ -150,6 +164,7 @@ class PlayerService : Service() {
         playbackError=""
         player?.release()
         playing = false;prepared=false;loading=true;wantPlay=autoPlay;positionMs=startPosition;artwork=null
+        durationMs=(song.optLong("duration").coerceIn(0,Int.MAX_VALUE/1000L)*1000).toInt()
         player = MediaPlayer().apply {
             setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
@@ -168,7 +183,7 @@ class PlayerService : Service() {
         }
         val identity=song.optString("mid")
         currentArtwork=song.artwork()
-        startForeground(42,notification());publish()
+        startForeground(42,notification());foreground=true;publish()
         val artworkUrl=currentArtwork
         if(artworkUrl.isNotEmpty())worker.execute{
             val bitmap=ArtworkCache.load(this,artworkUrl)
@@ -177,9 +192,61 @@ class PlayerService : Service() {
     }
 
     private fun pause() { wantPlay=false;if(prepared && playing)player?.pause();playing=false;publish() }
-    private fun resume() { if(expireSleepTimer())return;sleepFinished=false;wantPlay=true;if(prepared&&!loading){player?.start();playing=true;recordListening()};publish() }
-    private fun seek(position:Int){if(prepared){player?.seekTo(position.coerceIn(0,durationMs));positionMs=position};publish()}
-    private fun stopPlayback() { sleepTimer.clear();sleepFinished=false;generation++;actualQuality="";qualityPending=false;skipPending=false;downgraded=false;player?.release(); player = null;song=JSONObject();lyric="";translation="";currentArtwork="";currentIndex=-1;positionMs=0;playbackError="";prepared=false;loading=false;playing=false;publish();stopForeground(STOP_FOREGROUND_REMOVE);stopSelf() }
+    private fun resume() {
+        if(expireSleepTimer())return
+        sleepFinished=false;wantPlay=true
+        if(prepared&&!loading){player?.start();playing=true;recordListening();publish()}
+        else if(!loading&&song.optString("mid").isNotBlank())resolveSavedPlayback()
+        else publish()
+    }
+    private fun seek(position:Int){
+        val target=position.coerceIn(0,durationMs)
+        if(prepared)player?.seekTo(target)
+        positionMs=target
+        if(player==null&&song.optString("mid").isNotBlank())PlaybackStore.save(this,song,queue.objects(),currentIndex,target,durationMs)
+        publish()
+    }
+    private fun stopPlayback() { persistPlayback(true,true);sleepTimer.clear();sleepFinished=false;generation++;actualQuality="";qualityPending=false;skipPending=false;downgraded=false;player?.release(); player = null;song=JSONObject();queue=JSONArray();queueJson="[]";lyric="";translation="";currentArtwork="";currentIndex=-1;positionMs=0;durationMs=0;playbackError="";prepared=false;loading=false;playing=false;publish();foreground=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf() }
+
+    private fun persistPlayback(force:Boolean=false,sync:Boolean=false){
+        if(!prepared||loading||song.optString("mid").isBlank())return
+        val now=SystemClock.elapsedRealtime()
+        if(!force&&now-lastSave<5000)return
+        positionMs=runCatching{player?.currentPosition}.getOrNull()?:positionMs
+        PlaybackStore.save(this,song,queue.objects(),currentIndex,positionMs,durationMs,sync)
+        lastSave=now
+    }
+
+    private fun resolveSavedPlayback(){
+        if(skipPending){order.reset(queue.length(),currentIndex);skipPending=false}
+        qualityPending=false
+        val request=++generation
+        account=JSONObject(SecureStore(this).load()?:"{}")
+        val candidate=JSONObject(song.toString());val credentials=account.toString()
+        val preferences=getSharedPreferences("library",MODE_PRIVATE)
+        val quality=preferences.getString("audio_quality","auto")?:"auto"
+        val fallback=preferences.getBoolean("quality_fallback",true)
+        loading=true;playbackError="";playToken=java.util.UUID.randomUUID().toString()
+        startForeground(42,notification());foreground=true;publish()
+        worker.execute{
+            try{
+                val result=JSONObject(RustCore.call("play_url",JSONObject().put("song",candidate).put("session",JSONObject(credentials)).put("quality",quality).put("fallback",fallback).toString()))
+                ui.post{if(request==generation){
+                    loading=false
+                    if(!result.optBoolean("ok")){wantPlay=false;playbackError=result.optString("error",getString(R.string.request_retry));publish()}
+                    else{
+                        val data=result.getJSONObject("data");actualQuality=data.optString("quality");downgraded=data.optBoolean("downgraded")
+                        val position=if(durationMs>0&&positionMs>=durationMs)0 else positionMs
+                        play(data.getString("url"),position,wantPlay)
+                    }
+                }}
+                if(result.optBoolean("ok")){
+                    val resultLyrics=JSONObject(RustCore.call("lyrics",JSONObject().put("mid",candidate.optString("mid")).put("id",candidate.optLong("id")).put("session",JSONObject(credentials)).toString()))
+                    if(resultLyrics.optBoolean("ok"))ui.post{if(request==generation){val data=resultLyrics.getJSONObject("data");lyric=data.optString("lyric");translation=data.optString("translation");publish()}}
+                }
+            }catch(_:Exception){ui.post{if(request==generation){loading=false;wantPlay=false;playbackError=getString(R.string.request_retry);publish()}}}
+        }
+    }
 
     private fun recordListening(){
         if(historyToken!=playToken&&playing){ListeningHistory.record(this,song);historyToken=playToken}
@@ -191,6 +258,7 @@ class PlayerService : Service() {
     private fun finishSleep(){
         generation++;if(skipPending)order.reset(queue.length(),currentIndex)
         skipPending=false;qualityPending=false;sleepFinished=true
+        if(player==null)loading=false
         if(selectionPending)selectionInterruptedBySleep=true
         pause()
     }
@@ -206,6 +274,7 @@ class PlayerService : Service() {
         val preferences=getSharedPreferences("library",MODE_PRIVATE)
         val quality=preferences.getString("audio_quality","auto")?:"auto"
         val fallback=preferences.getBoolean("quality_fallback",true)
+        if(player==null)account=JSONObject(SecureStore(this).load()?:"{}")
         val credentials=account.toString()
         worker.execute{
             try{
@@ -227,6 +296,11 @@ class PlayerService : Service() {
         val settings=getSharedPreferences("library",MODE_PRIVATE)
         settings.edit().putString("audio_quality",preference).putBoolean("quality_fallback",fallback).apply()
         if(skipPending){order.reset(queue.length(),currentIndex);skipPending=false}
+        if(player==null){
+            generation++;loading=false;qualityPending=false
+            if(wantPlay)resolveSavedPlayback()else publish()
+            return
+        }
         val request=++generation
         val candidate=song.toString();val credentials=account.toString()
         qualityPending=true;updateSnapshot()
@@ -247,10 +321,10 @@ class PlayerService : Service() {
         }
     }
 
-    private fun updateSnapshot(){snapshot=PlaybackSnapshot(song.optString("mid"),currentTitle,currentArtist,currentArtwork,playing,positionMs,durationMs,lyric,translation,playbackError,playToken,actualQuality,qualityPending,downgraded,((sleepTimer.remaining(SystemClock.elapsedRealtime())+999)/1000).toInt(),sleepTimer.isAfterTrack,sleepFinished,sleepTimer.minutes)}
+    private fun updateSnapshot(){snapshot=PlaybackSnapshot(song.optString("mid"),currentTitle,currentArtist,currentArtwork,playing,positionMs,durationMs,lyric,translation,playbackError,playToken,actualQuality,qualityPending,downgraded,((sleepTimer.remaining(SystemClock.elapsedRealtime())+999)/1000).toInt(),sleepTimer.isAfterTrack,sleepFinished,sleepTimer.minutes,queueJson,currentIndex)}
 
     private fun publish() {
-        val duration = (if(prepared)player?.duration?.toLong() else null)?.takeIf { it > 0 } ?: song.optLong("duration") * 1000
+        val duration = (if(prepared)player?.duration?.toLong() else null)?.takeIf { it > 0 } ?: durationMs.toLong().takeIf{it>0} ?: song.optLong("duration") * 1000
         durationMs = duration.toInt()
         if(prepared&&!loading)positionMs=player?.currentPosition ?: 0
         isPlaying = playing
@@ -258,6 +332,7 @@ class PlayerService : Service() {
         currentArtist = song.optString("artist")
         currentLyric = lyric
         currentTranslation = translation
+        persistPlayback(true)
         updateSnapshot()
         val extra = android.os.Bundle().apply {
             // LyriconProvider can read this ColorOS compatible field from MediaSession.
@@ -277,7 +352,7 @@ class PlayerService : Service() {
             .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_STOP or PlaybackState.ACTION_SEEK_TO or PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS)
             .setState(if(loading)PlaybackState.STATE_BUFFERING else if(playbackError.isNotEmpty()&&!playing)PlaybackState.STATE_ERROR else if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
                 positionMs.toLong(), if (playing) 1f else 0f, SystemClock.elapsedRealtime()).build())
-        if (player != null) getSystemService(NotificationManager::class.java).notify(42, notification())
+        if (foreground) getSystemService(NotificationManager::class.java).notify(42, notification())
         sendBroadcast(Intent("dev.qqlyric.app.PLAYBACK").setPackage(packageName)
             .putExtra("playing", playing).putExtra("position", positionMs))
     }
@@ -302,6 +377,7 @@ class PlayerService : Service() {
     }
 
     override fun onDestroy(){
+        persistPlayback(true,true)
         generation++;song=JSONObject();ui.removeCallbacksAndMessages(null);worker.shutdownNow();player?.release();session.release()
         snapshot=PlaybackSnapshot();positionMs=0;durationMs=0;isPlaying=false;currentTitle="";currentArtist="";currentLyric="";currentTranslation="";currentIndex=-1;playbackError="";currentArtwork=""
         super.onDestroy()

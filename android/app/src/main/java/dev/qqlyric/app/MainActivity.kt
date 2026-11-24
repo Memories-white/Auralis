@@ -116,7 +116,7 @@ class MainActivity:ComponentActivity(){
             }
             OverlayDialog(show=qualityMenu,title=stringResource(R.string.audio_quality),onDismissRequest={qualityMenu=false}){Column(Modifier.fillMaxWidth().heightIn(max=500.dp).verticalScroll(rememberScrollState())){QualityChoices(m)}}
             OverlayBottomSheet(show=queue,title=stringResource(R.string.play_queue_count,m.queue.size),onDismissRequest={queue=false}){
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max=480.dp)){itemsIndexed(m.queue){index,song->SongRow(song,index==PlayerService.currentIndex){queue=false;m.play(m.queue,index)}}}
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max=480.dp)){itemsIndexed(m.queue){index,song->SongRow(song,index==m.currentIndex){queue=false;m.play(m.queue,index)}}}
             }
         }
     }
@@ -190,7 +190,7 @@ class MainActivity:ComponentActivity(){
 @Composable internal fun MusicSectionTitle(title:String){Text(title,Modifier.padding(start=24.dp,end=16.dp,top=20.dp,bottom=12.dp).semantics{heading()},style=MiuixTheme.textStyles.title3,color=MiuixTheme.colorScheme.onSurface)}
 @Composable internal fun SectionHeader(title:String,refresh:()->Unit){Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){Box(Modifier.weight(1f)){MusicSectionTitle(title)};IconButton(onClick=refresh,modifier=Modifier.padding(end=16.dp,top=8.dp)){Icon(MiuixIcons.Refresh,stringResource(R.string.refresh),Modifier.size(22.dp),tint=MiuixTheme.colorScheme.onSurfaceVariantSummary)}}}
 @Composable internal fun EmptyMessage(title:String,summary:String){Column(Modifier.fillMaxWidth().padding(28.dp,40.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text(title,style=MiuixTheme.textStyles.title3);Text(summary,color=MiuixTheme.colorScheme.onSurfaceVariantSummary)}}
-internal fun playingSong(m:MusicState,song:JSONObject)=m.queue.getOrNull(PlayerService.currentIndex)?.optString("mid")==song.optString("mid")
+internal fun playingSong(m:MusicState,song:JSONObject)=m.mid.isNotBlank()&&m.mid==song.optString("mid")
 
 @Composable internal fun Artwork(url:String,label:String,modifier:Modifier=Modifier,avatar:Boolean=false){
     val context=LocalContext.current

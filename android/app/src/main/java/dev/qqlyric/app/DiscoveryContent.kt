@@ -48,7 +48,7 @@ fun LazyListScope.homeDiscovery(m:MusicState,showQueue:()->Unit){
     item("recommend-header"){SectionHeader(stringResource(R.string.recommended_songs),m::refreshHome)}
     item("songs-shelf"){if(m.discoverySongs.isNotEmpty())AlbumShelf(m.discoverySongs.take(6),false){_,i->m.play(m.discoverySongs,i)}else DiscoveryLoadState(m)}
     item("playlists-header"){MusicSectionTitle(stringResource(R.string.recommended_playlists))}
-    item("playlists-shelf"){AlbumShelf(m.recommendations(),true){s,_->m.playlist(s.optLong("id"),0,s.optString("title"))}}
+    item("playlists-shelf"){AlbumShelf(m.recommendations(),true){s,_->m.recommendedPlaylist(s)}}
     item("more-music"){MusicSectionTitle(stringResource(R.string.keep_discovering))}
     itemsIndexed(m.discoverySongs.drop(6),key={i,s->"discovery:${s.optString("mid")}:$i"}){i,s->SongRow(s,playingSong(m,s)){m.play(m.discoverySongs,i+6)}}
     item("discovery-load"){if(m.discoverySongs.isNotEmpty())DiscoveryLoadState(m)}

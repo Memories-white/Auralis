@@ -603,9 +603,7 @@ fn home(session: &Value) -> Result<Value, String> {
                                     .unwrap_or(202) as u64;
                             }
                             if !title.is_empty() {
-                                cards.push(
-                                    json!({"title":title,"id":card["id"],"cover":card["cover"]}),
-                                );
+                                cards.push(discovery::recommendation_card(card));
                             }
                         }
                     }
@@ -628,6 +626,7 @@ pub fn dispatch(command: &str, input: &str) -> String {
             "home" => home(&v["session"]),
             "recommend" => discovery::recommend(&v),
             "add_song" => discovery::add_song(&v["session"],v["dirid"].as_u64().unwrap_or(0),v["id"].as_u64().unwrap_or(0)),
+            "guess" => discovery::guess(&v),
             "library" => library(&v["session"]),
             "playlist" => playlist(
                 &v["session"],

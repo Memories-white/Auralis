@@ -92,9 +92,12 @@ cargo test --manifest-path core/Cargo.toml --locked --offline
 .\android\gradlew.bat -p android :app:assembleDebugAndroidTest
 adb install -r -t android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb shell am instrument -w dev.qqlyric.app.test/dev.qqlyric.app.PlaybackSmokeTest
+adb shell am instrument -w -e mode restore dev.qqlyric.app.test/dev.qqlyric.app.PlaybackSmokeTest
 ```
 
 测试 APK 生成两分钟的本地静音 WAV，通过正常播放服务验证成功播放记录、暂停恢复去重、歌曲结束定时优先于循环，以及真实一分钟倒计时暂停，耗时约 70 秒。它临时修改播放状态，完成后恢复原最近播放记录与顺序偏好并停止测试音频；请勿在收听音乐时运行。测试类仅存在于 `androidTest`，不打入主 APK，也不开放额外外部控制入口。
+
+`mode restore` 检查元数据白名单、暂停恢复、队列身份、进度保存、停止服务后回显、有界队列与损坏 / 未知版本记录；不播放音频，结束后恢复原播放记录。默认播放检查也会恢复原恢复快照。测试组件可通过 `adb uninstall dev.qqlyric.app.test` 移除。
 
 ## 安装与签名
 
