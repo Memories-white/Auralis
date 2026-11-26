@@ -193,6 +193,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
     private fun handle(event:JSONObject){
         val m=music
         when(event.optString("type")){
+            "animation_rate"->if(Build.VERSION.SDK_INT>=35)setRequestedFrameRate(if(event.optBoolean("active"))android.view.View.REQUESTED_FRAME_RATE_CATEGORY_HIGH else android.view.View.REQUESTED_FRAME_RATE_CATEGORY_DEFAULT)
             "ready"->{ready=true;contentKeys=null;lastPulse="";publish()}
             "navigate"->{val page=event.optString("page");if(page in setOf("home","mine","search")+SETTINGS_ROUTES)m.navigate(page)}
             "back"->m.back()

@@ -31,6 +31,18 @@ struct App {
     lyric_scroll: f64,
     lyric_velocity: f64,
     row_motion: HashMap<usize, lyric_motion::RowMotion>,
+    lyric_nodes: Vec<HtmlElement>,
+    lyric_viewport: Option<HtmlElement>,
+    lyric_dirty: bool,
+    lyric_height: i32,
+    browsing_last: bool,
+    clock_at: f64,
+    mini_expanded: bool,
+    sheet_motion: lyric_motion::RowMotion,
+    sheet_target: f64,
+    release_frame_vote: bool,
+    sheet_bounds: [f64; 4],
+    artwork_bounds: [f64; 8],
     last_frame: f64,
     mini_until: f64,
     last_load: f64,
@@ -294,6 +306,7 @@ pub fn update(input: &str) {
                 .iter()
                 .any(|key| app.live[key] != packet["state"][key]);
                 app.live = packet["state"].clone();
+                app.clock_at = now();
                 if identity || toggle || controls {
                     if b(&app.live, "playing") {
                         app.mini_until = now() + 4500.0;
@@ -696,6 +709,11 @@ impl App {
             "player",
             &render::player(&self.live, &self.data, &self.lines, &self.translations),
         );
+        self.lyric_viewport = el("lyric-viewport").and_then(|e| e.dyn_into().ok());
+        self.lyric_nodes = (0..self.lines.len())
+            .filter_map(|i| el(&format!("lyric-{i}")).and_then(|e| e.dyn_into().ok()))
+            .collect();
+        self.lyric_dirty = true;
         self.active_line = None;
         if let Some(viewport) = el("lyric-viewport").and_then(|e| e.dyn_into::<HtmlElement>().ok())
         {
@@ -738,6 +756,10 @@ impl App {
             return;
         }
         self.player = true;
+        self.release_frame_vote = false;
+        post(json!({"type":"animation_rate","active":true}));
+        self.sheet_motion.place(self.sheet_target - 1.0, 0.0);
+        self.sheet_target = 1.0;
         self.player_page = 1;
         self.paint_player();
         if let Some(player) = el("player") {
@@ -757,6 +779,9 @@ impl App {
     }
     fn close_player(&mut self) {
         self.player = false;
+        self.release_frame_vote = true;
+        self.sheet_motion.place(self.sheet_target, 0.0);
+        self.sheet_target = 0.0;
         if let Some(player) = el("player") {
             self.player_origin(&player);
             class(&player, "visible", false);
@@ -764,7 +789,7 @@ impl App {
             let _ = player.set_attribute("inert", "");
         }
     }
-    fn player_origin(&self, player: &Element) {
+    fn player_origin(&mut self, player: &Element) {
         if let Some(mini) = el("mini-player") {
             let r = mini.get_bounding_client_rect();
             let window = web_sys::window().unwrap();
@@ -782,6 +807,36 @@ impl App {
             style(player, "--origin-y", &format!("{}px", r.y()));
             style(player, "--origin-sx", &(r.width() / w).to_string());
             style(player, "--origin-sy", &(r.height() / h).to_string());
+            self.sheet_bounds = [r.x(), r.y(), r.width(), r.height()];
+            if let (Some(mini_art), Some(full_art)) = (
+                mini.query_selector(".mini-art").ok().flatten(),
+                el("cover-art"),
+            ) {
+                let a = mini_art.get_bounding_client_rect();
+                let b = full_art.get_bounding_client_rect();
+                self.artwork_bounds = [
+                    a.x(),
+                    a.y(),
+                    a.width(),
+                    a.height(),
+                    b.x(),
+                    b.y(),
+                    b.width(),
+                    b.height(),
+                ];
+                if let Some(old) = el("shared-artwork") {
+                    old.remove();
+                }
+                if let Ok(overlay) = doc().create_element("div") {
+                    overlay.set_id("shared-artwork");
+                    if let Ok(copy) = mini_art.clone_node_with_deep(true) {
+                        let _ = overlay.append_child(&copy);
+                    }
+                    if let Some(root) = el("app") {
+                        let _ = root.append_child(&overlay);
+                    }
+                }
+            }
         }
     }
     fn paint_overlay(&self) {
@@ -832,7 +887,12 @@ impl App {
         if !self.player || self.lines.is_empty() {
             return;
         }
-        let position = n(&self.live, "position");
+        let position = n(&self.live, "position")
+            + if b(&self.live, "playing") {
+                (now() - self.clock_at).clamp(0.0, 250.0) as i32
+            } else {
+                0
+            };
         let next = self
             .lines
             .partition_point(|(time, _)| *time <= position)
@@ -841,6 +901,7 @@ impl App {
             return;
         }
         self.active_line = next;
+        self.lyric_dirty = true;
         for index in 0..self.lines.len() {
             if let Some(line) = el(&format!("lyric-{index}")) {
                 let selected = Some(index) == next;
@@ -907,57 +968,163 @@ impl App {
         self.limits.insert(route, next);
         self.paint_content();
     }
-    fn frame(&mut self, time: f64) {
-        if let Some(mini) = el("mini-player") {
-            class(&mini, "expanded", self.mini_until > time);
+    fn animate_sheet(&mut self, dt: f64) {
+        if self.sheet_motion.offset == 0.0 {
+            if self.release_frame_vote {
+                self.release_frame_vote = false;
+                post(json!({"type":"animation_rate","active":false}));
+            }
+            return;
         }
-        let dt = ((time - self.last_frame) / 1000.0).clamp(0.0, 0.032);
+        let p = if self.reduced {
+            self.sheet_motion = Default::default();
+            self.sheet_target
+        } else {
+            (self.sheet_target + self.sheet_motion.sample(dt, 420.0)).clamp(0.0, 1.0)
+        };
+        if let Some(player) = el("player") {
+            let w = web_sys::window()
+                .unwrap()
+                .inner_width()
+                .ok()
+                .and_then(|v| v.as_f64())
+                .unwrap_or(1.0);
+            let h = web_sys::window()
+                .unwrap()
+                .inner_height()
+                .ok()
+                .and_then(|v| v.as_f64())
+                .unwrap_or(1.0);
+            let [x, y, mw, mh] = self.sheet_bounds;
+            let q = 1.0 - p;
+            style(
+                &player,
+                "clip-path",
+                &format!(
+                    "inset({}px {}px {}px {}px round {}px)",
+                    y * q,
+                    (w - x - mw).max(0.0) * q,
+                    (h - y - mh).max(0.0) * q,
+                    x * q,
+                    32.0 * q
+                ),
+            );
+            style(&player, "--sheet-alpha", if p > 0.001 { "1" } else { "0" });
+            style(
+                &player,
+                "--sheet-content",
+                &((p - 0.1) / 0.5).clamp(0.0, 1.0).to_string(),
+            );
+            style(
+                &player,
+                "--cover-opacity",
+                if p < 0.999 && p > 0.001 { "0" } else { "1" },
+            );
+        }
+        if let Some(art) = el("shared-artwork") {
+            let a = self.artwork_bounds;
+            let y = p * 0.6 + p * p * (3.0 - 2.0 * p) * 0.4;
+            style(
+                &art,
+                "transform",
+                &format!(
+                    "translate3d({}px,{}px,0) scale({},{})",
+                    a[0] + (a[4] - a[0]) * p,
+                    a[1] + (a[5] - a[1]) * y,
+                    (a[2] + (a[6] - a[2]) * p) / a[2].max(1.0),
+                    (a[3] + (a[7] - a[3]) * p) / a[3].max(1.0)
+                ),
+            );
+            style(&art, "width", &format!("{}px", a[2]));
+            style(&art, "height", &format!("{}px", a[3]));
+            style(
+                &art,
+                "opacity",
+                if p > 0.001 && p < 0.999 { "1" } else { "0" },
+            );
+        }
+    }
+    fn frame(&mut self, time: f64) {
+        let expanded = self.mini_until > time;
+        if expanded != self.mini_expanded {
+            if let Some(mini) = el("mini-player") {
+                class(&mini, "expanded", expanded);
+            }
+            self.mini_expanded = expanded;
+        }
+        let dt = ((time - self.last_frame) / 1000.0).clamp(0.0, 0.1);
         self.last_frame = time;
-        if self.player && self.player_page == 2 && time > self.browse_until {
-            if let (Some(index), Some(viewport)) = (
-                self.active_line,
-                el("lyric-viewport").and_then(|v| v.dyn_into::<HtmlElement>().ok()),
-            ) {
-                if let Some(lines) = el("lyric-lines") {
-                    let top = format!("{}px", viewport.client_height() as f64 * 0.36);
-                    if lines
-                        .dyn_ref::<HtmlElement>()
-                        .and_then(|e| e.style().get_property_value("padding-top").ok())
-                        .as_deref()
-                        != Some(&top)
-                    {
-                        style(&lines, "padding-top", &top);
-                        style(
-                            &lines,
-                            "padding-bottom",
-                            &format!("{}px", viewport.client_height() as f64 * 0.64),
-                        );
-                    }
+        self.animate_sheet(dt);
+        if !self.player || self.player_page != 2 {
+            return;
+        }
+        self.sync_lyrics();
+        let Some(viewport) = self.lyric_viewport.clone() else {
+            return;
+        };
+        let height = viewport.client_height();
+        let browsing = time <= self.browse_until;
+        if browsing != self.browsing_last {
+            class(&viewport, "browsing", browsing);
+            self.browsing_last = browsing;
+            self.lyric_dirty = true;
+            for i in self.row_motion.keys() {
+                if let Some(row) = self.lyric_nodes.get(*i) {
+                    let _ = row.style().remove_property("translate");
                 }
-                if let Some(line) =
-                    el(&format!("lyric-{index}")).and_then(|v| v.dyn_into::<HtmlElement>().ok())
-                {
-                    let target = (line.offset_top() as f64
-                        - viewport.client_height() as f64 * 0.36)
-                        .max(0.0);
-                    let old = viewport.scroll_top() as f64;
-                    let destination = target.round();
-                    let travel = destination - old;
-                    if travel.abs() > 1.0 {
-                        let visible: Vec<usize> = (0..self.lines.len())
-                            .filter(|i| {
-                                el(&format!("lyric-{i}"))
-                                    .and_then(|e| e.dyn_into::<HtmlElement>().ok())
-                                    .map(|e| {
-                                        e.offset_top() as f64 + e.offset_height() as f64 > old
-                                            && (e.offset_top() as f64)
-                                                < old + viewport.client_height() as f64
-                                    })
-                                    .unwrap_or(false)
-                            })
-                            .collect();
-                        viewport.set_scroll_top(destination as i32);
-                        for i in 0..self.lines.len() {
+            }
+            self.row_motion.clear();
+        }
+        if browsing {
+            return;
+        }
+        if height != self.lyric_height {
+            self.lyric_height = height;
+            self.lyric_dirty = true;
+            if let Some(lines) = el("lyric-lines") {
+                style(
+                    &lines,
+                    "padding-top",
+                    &format!("{}px", height as f64 * 0.36),
+                );
+                style(
+                    &lines,
+                    "padding-bottom",
+                    &format!("{}px", height as f64 * 0.64),
+                );
+            }
+        }
+        let Some(index) = self.active_line else {
+            return;
+        };
+        if self.lyric_dirty {
+            self.lyric_dirty = false;
+            if let Some(focus) = self.lyric_nodes.get(index) {
+                let old = viewport.scroll_top() as f64;
+                let target = (focus.offset_top() as f64 - height as f64 * 0.36)
+                    .max(0.0)
+                    .round();
+                let travel = target - old;
+                if travel.abs() > 0.5 {
+                    let measured: Vec<(usize, f64, f64)> = self
+                        .lyric_nodes
+                        .iter()
+                        .enumerate()
+                        .map(|(i, e)| (i, e.offset_top() as f64, e.offset_height() as f64))
+                        .collect();
+                    let visible: Vec<usize> = measured
+                        .iter()
+                        .filter(|(_, y, h)| *y + *h > old && *y < old + height as f64)
+                        .map(|(i, _, _)| *i)
+                        .collect();
+                    let animate = !self.reduced && travel.abs() < height as f64 * 1.5;
+                    viewport.set_scroll_top(target as i32);
+                    for (i, y, h) in measured {
+                        if y + h < target - 120.0 || y > target + height as f64 + 120.0 {
+                            continue;
+                        }
+                        let row = self.row_motion.entry(i).or_default();
+                        if animate {
                             let rank =
                                 visible
                                     .iter()
@@ -967,45 +1134,36 @@ impl App {
                                     } else {
                                         visible.len().saturating_sub(1)
                                     });
-                            self.row_motion
-                                .entry(i)
-                                .or_default()
-                                .place(travel, lyric_motion::delay(rank, visible.len()));
-                        }
-                    }
-                    let gap = self
-                        .lines
-                        .get(index + 1)
-                        .map(|l| l.0 - self.lines[index].0)
-                        .unwrap_or(1000);
-                    for (i, row) in &mut self.row_motion {
-                        let offset = if self.reduced {
-                            *row = Default::default();
-                            0.0
+                            row.place(travel, lyric_motion::delay(rank, visible.len()));
                         } else {
-                            row.sample(dt, lyric_motion::stiffness(gap))
-                        };
-                        if let Some(element) = el(&format!("lyric-{i}")) {
-                            style(&element, "translate", &format!("0 {offset}px"));
+                            *row = Default::default();
                         }
                     }
                 }
             }
         }
-        if let Some(viewport) = el("lyric-viewport") {
-            let browsing = time <= self.browse_until;
-            class(&viewport, "browsing", browsing);
-            if browsing {
-                self.row_motion.clear();
-                if let Ok(rows) = viewport.query_selector_all(".lyric-line") {
-                    for i in 0..rows.length() {
-                        if let Some(row) = rows.item(i).and_then(|e| e.dyn_into::<Element>().ok()) {
-                            style(&row, "translate", "0 0");
-                        }
-                    }
+        let gap = self
+            .lines
+            .get(index + 1)
+            .map(|l| l.0 - self.lines[index].0)
+            .unwrap_or(1000);
+        self.row_motion.retain(|i, row| {
+            let offset = if self.reduced {
+                0.0
+            } else {
+                row.sample(dt, lyric_motion::stiffness(gap))
+            };
+            if let Some(element) = self.lyric_nodes.get(*i) {
+                if offset.abs() < 0.01 {
+                    let _ = element.style().remove_property("translate");
+                    let _ = element.style().remove_property("will-change");
+                } else {
+                    style(element, "will-change", "translate,transform");
+                    style(element, "translate", &format!("0 {offset:.3}px"));
                 }
             }
-        }
+            offset.abs() >= 0.01
+        });
     }
 }
 

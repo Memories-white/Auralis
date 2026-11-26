@@ -17,14 +17,17 @@ impl RowMotion {
         let elapsed = dt.min(self.wait);
         self.wait -= elapsed;
         let remaining = dt - elapsed;
-        // Small substeps keep the short-interval (1200 stiffness) branch stable.
-        let steps = (remaining / 0.004).ceil().max(1.0) as usize;
-        let step = remaining / steps as f64;
-        for _ in 0..steps {
-            self.velocity +=
-                (-stiffness * self.offset - 2.0 * 1.1 * stiffness.sqrt() * self.velocity) * step;
-            self.offset += self.velocity * step;
-        }
+        // Exact overdamped spring: identical travel at 60/90/120/144 Hz.
+        let omega = stiffness.sqrt();
+        let root = (1.1_f64 * 1.1 - 1.0).sqrt();
+        let a = -omega * (1.1 - root);
+        let b = -omega * (1.1 + root);
+        let c = (self.velocity - b * self.offset) / (a - b);
+        let d = self.offset - c;
+        let ea = (a * remaining).exp();
+        let eb = (b * remaining).exp();
+        self.offset = c * ea + d * eb;
+        self.velocity = a * c * ea + b * d * eb;
         if self.offset.abs() < 0.01 && self.velocity.abs() < 0.01 {
             self.offset = 0.0;
             self.velocity = 0.0;
@@ -45,6 +48,19 @@ mod tests {
     fn cascade_is_bounded() {
         assert_eq!(delay(5, 6), 200.0);
         assert_eq!(delay(1, 2), 50.0);
+    }
+    #[test]
+    fn refresh_rates_share_the_same_trajectory() {
+        let mut results = Vec::new();
+        for hz in [60, 90, 120, 144] {
+            let mut r = RowMotion::default();
+            r.place(200.0, 0.0);
+            for _ in 0..hz {
+                r.sample(1.0 / hz as f64, 80.0);
+            }
+            results.push(r.offset);
+        }
+        assert!(results.iter().all(|v| (v - results[0]).abs() < 0.00001));
     }
     #[test]
     fn quick_lines_accelerate() {
