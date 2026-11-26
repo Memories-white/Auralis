@@ -918,7 +918,10 @@ h1 {
   flex:1;
   min-height:0;
   overflow:hidden;
-  --page:1;
+  --page:1
+}
+/* Nested scroll containers must also reserve horizontal gestures for the player. */
+.player-pages,.lyric-viewport,.information-pane {
   touch-action:pan-y
 }
 .player-strip {

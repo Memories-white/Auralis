@@ -92,9 +92,27 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     const opened = await page.locator('#player').boundingBox();
     assert.ok(Math.abs(opened.y) < 1 && Math.abs(opened.width - 411) < 1, 'Player did not expand to window');
     await page.screenshot({ path: path.join(output, 'player-light.png') });
-    await page.locator('#player-pages').dispatchEvent('pointerdown', { clientX: 330, clientY: 350 });
-    await page.locator('#player-pages').dispatchEvent('pointerup', { clientX: 60, clientY: 352 });
-    await page.waitForTimeout(600);
+    const touch = await page.context().newCDPSession(page);
+    const swipeTo = async (direction, expected) => {
+      const { x, y, width, height } = await page.locator('#player-pages').boundingBox();
+      const start = x + width * (direction === 'left' ? 0.77 : 0.23);
+      const end = x + width * (direction === 'left' ? 0.23 : 0.77);
+      const touchY = y + height * 0.45;
+      await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: start, y: touchY }] });
+      for (let step = 1; step <= 8; step++) {
+        const touchX = start + (end - start) * step / 8;
+        await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: touchX, y: touchY }] });
+      }
+      await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await page.waitForTimeout(600);
+      assert.ok(await page.locator(`#page-dot-${expected}.selected`).count(), `Swipe ${direction} did not open player page ${expected}`);
+    };
+    await swipeTo('left', 2);
+    await swipeTo('right', 1);
+    await swipeTo('right', 0);
+    await swipeTo('left', 1);
+    await swipeTo('left', 2);
+    await touch.detach();
     assert.ok(await page.locator('#player').evaluate(e => e.classList.contains('lyrics-page')), 'Swipe left did not open lyrics');
     live.position = 6500; await pulse(); await page.waitForTimeout(1300);
     assert.ok(await page.locator('#lyric-2').evaluate(e => e.classList.contains('active')));
@@ -153,7 +171,7 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     data.page = 'home'; await content();
     await page.screenshot({ path: path.join(output, 'wide-dark.png') });
     assert.equal(errors.length, 0, errors.join('\n'));
-    console.log('PASS: real Rust/WASM boot, safe layout, shelf gutter, one daily entry, player expansion, left-swipe lyrics, exact active line, manual-follow recovery, automatic mini collapse, search/IME focus, playlist filters/loading/retry, top/locate, settings dependencies, half-height sheet and wide layout.');
+    console.log('PASS: real Rust/WASM boot, safe layout, shelf gutter, one daily entry, player expansion, touch swipes between information, cover, and lyrics, exact active line, manual-follow recovery, automatic mini collapse, search/IME focus, playlist filters/loading/retry, top/locate, settings dependencies, half-height sheet and wide layout.');
     fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ result: 'passed', engine: 'real Rust/WASM; mock native service bridge', focal, bounds, screenshots: fs.readdirSync(output).filter(n => n.endsWith('.png')) }, null, 2));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
