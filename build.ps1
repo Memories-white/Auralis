@@ -1,6 +1,8 @@
 param([switch]$Offline, [string]$Aapt2Path = '')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+& (Join-Path $projectRoot 'build-ui.ps1') -Offline:$Offline
+if ($LASTEXITCODE -ne 0) { throw 'Rust UI build failed.' }
 $sdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } elseif ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { throw 'Set ANDROID_HOME or ANDROID_SDK_ROOT to the Android SDK.' }
 $ndkRoot = if ($env:ANDROID_NDK_HOME) { $env:ANDROID_NDK_HOME } else {
     $candidate = Get-ChildItem (Join-Path $sdk 'ndk') -Directory | Sort-Object Name -Descending | Select-Object -First 1

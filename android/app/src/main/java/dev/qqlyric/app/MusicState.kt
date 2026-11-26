@@ -165,7 +165,7 @@ class MusicState(private val context:Context,private val protocol:(String,String
         if(destination==page)return
         playlistGeneration++;searchGeneration++
         if(destination!="songs")cancelDetail()
-        if(destination=="home"||destination=="mine")backStack.clear() else backStack.add(page)
+        if(destination=="home"||destination=="mine"||destination=="settings")backStack.clear() else backStack.add(page)
         page=destination;status="";busy=false
         if(destination=="mine"&&loggedIn&&library.length()==0)refreshLibrary()
     }

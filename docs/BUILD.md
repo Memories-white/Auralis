@@ -10,7 +10,8 @@
 | :-- | :-- |
 | 系统与脚本 | Windows + PowerShell，当前完整构建入口为 `build.ps1` |
 | JDK | 21；Android Java / Kotlin 字节码目标为 17 |
-| Rust | 稳定版工具链，安装 `aarch64-linux-android` target |
+| Rust | 稳定版工具链，安装 `aarch64-linux-android` 与 `wasm32-unknown-unknown` target |
+| WASM 绑定 | `wasm-bindgen-cli` 0.2.108，与 UI Cargo.lock 保持一致 |
 | Android SDK | platform `android-37.2`，compileSdk 37 / minor 2 |
 | Android NDK | 已验证 `27.2.12479018` |
 | Gradle | Wrapper 9.7.1，无需另装全局 Gradle |
@@ -34,6 +35,8 @@ $env:ANDROID_NDK_HOME = Join-Path $env:ANDROID_HOME 'ndk\27.2.12479018'
 $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
 
 rustup target add aarch64-linux-android
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.108 --locked
 .\build.ps1
 ```
 
@@ -41,10 +44,10 @@ rustup target add aarch64-linux-android
 
 脚本依次执行：
 
-1. 配置 NDK arm64 clang、ar 和 Rust linker。
-2. 在 `core/` 中构建 `aarch64-linux-android` release 动态库。
+1. 编译 `ui/` 的 Rust/WASM 界面，生成本机 WebView 资源。
+2. 配置 NDK arm64 clang、ar 和 Rust linker，构建 `core/` release 动态库。
 3. 复制动态库到 `android/app/src/main/jniLibs/arm64-v8a/`。
-4. 通过 Gradle Wrapper 执行 `:app:assembleDebug`。
+4. 通过 Gradle Wrapper 执行 `:app:assembleDebug`；缺失或过期 UI 资源会使构建失败。
 
 最终产物：
 
@@ -52,7 +55,7 @@ rustup target add aarch64-linux-android
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-仓库不包含预编译 `.so`。新克隆必须先完成 Rust 构建；直接执行 Android `assembleDebug` 不能替代完整构建。
+仓库不包含预编译 `.so`、WASM 或自动生成的绑定。新克隆必须先完成 Rust 构建；直接执行 Android `assembleDebug` 不能替代完整构建。只重建界面可运行 `build-ui.ps1`。运行时需要较新的 Android System WebView，不会从远程网站加载界面。
 
 ### 离线与 AAPT2
 
@@ -76,13 +79,23 @@ android/app/build/outputs/apk/debug/app-debug.apk
 .\test.ps1 -Offline
 ```
 
-运行 Rust 单元测试，以及独立的 Java 播放顺序、图片磁盘缓存、封面取色和睡眠定时检查。这些测试不需要账号登录，也不会读取真实账号凭据。仅做协议层测试时可运行：
+运行 Rust UI 与协议单元测试，以及独立的 Java 播放顺序、图片磁盘缓存、封面取色和睡眠定时检查。这些测试不需要账号登录，也不会读取真实账号凭据。仅做协议层测试时可运行：
 
 ```powershell
 cargo test --manifest-path core/Cargo.toml --locked --offline
 ```
 
 这些检查不能替代真实设备上的媒体通知、音质切换、动画或 LyriconProvider 联调。当前验证范围见 [设备验证记录](../design/DEVICE_VALIDATION.md)。
+
+### Rust 界面交互检查
+
+已完成 `build-ui.ps1` 后，在临时工具目录安装 Playwright 与 Chromium，设置 `PLAYWRIGHT_MODULE` 为该工具目录的 `node_modules/playwright`，然后运行：
+
+```powershell
+node tools/check-rust-ui.cjs
+```
+
+检查真正的 Rust/WASM 页面，包括左右滑动、播放器从歌曲栏展开、歌词焦点 / 浏览恢复、搜索焦点、歌单分组、加载 / 重试、设置与半屏面板。平台服务使用测试桥接，截图明确使用测试数据。实机 DevTools 检查另见 `tools/check-device-rust-ui.cjs`，仅适用于已授权 USB 调试的 debug 安装包。
 
 ### 本地音频实机集成检查
 

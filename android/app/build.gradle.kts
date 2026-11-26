@@ -13,8 +13,8 @@ android {
         applicationId = "dev.qqlyric.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 20
-        versionName = "0.3.10-preview"
+        versionCode = 21
+        versionName = "0.4.0-preview"
         testInstrumentationRunner = "dev.qqlyric.app.PlaybackSmokeTest"
         ndk { abiFilters += "arm64-v8a" }
     }
@@ -23,8 +23,6 @@ android {
 }
 dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.5-beta01")
-    implementation("top.yukonga.miuix.kmp:miuix-preference-android:0.9.5-beta01")
-    implementation("top.yukonga.miuix.kmp:miuix-icons-android:0.9.5-beta01")
     implementation("androidx.activity:activity-compose:1.12.4")
     implementation("com.google.android.material:material:1.13.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
@@ -37,3 +35,15 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime:2.6.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-savedstate:2.6.2")
 }
+
+val verifyRustUiAssets by tasks.registering {
+    doLast {
+        val wasm = file("src/main/assets/ui/pkg/auralis_ui_bg.wasm")
+        val sources = fileTree("../../ui/src").files + fileTree("../../ui/host").files +
+            listOf(file("../../ui/Cargo.toml"), file("../../ui/Cargo.lock"), file("src/main/res/values/strings.xml"))
+        check(wasm.isFile && sources.none { it.lastModified() > wasm.lastModified() }) {
+            "Rust UI assets are missing or stale. Run build-ui.ps1 (or the full build.ps1) from the repository root."
+        }
+    }
+}
+tasks.named("preBuild") { dependsOn(verifyRustUiAssets) }

@@ -1,5 +1,7 @@
 core/target/
 core/.tmp/
+ui/target/
+android/app/src/main/assets/ui/
 android/.gradle/
 android/build/
 android/app/build/

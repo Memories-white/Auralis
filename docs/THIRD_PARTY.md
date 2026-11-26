@@ -7,12 +7,13 @@
 | 项目 | 用途 | 许可 / 说明 |
 | :-- | :-- | :-- |
 | [Melodist](https://github.com/Viemean/melodist) | 账号登录、接口调用研究与首页层次参考 | MIT；保留 [许可原文](licenses/Melodist-LICENSE) 及作者署名 |
-| [MIUIX 0.9.5-beta01](https://github.com/compose-miuix-ui/miuix/tree/v0.9.5-beta01) | Compose 组件、主题、图标与设计规范 | Apache-2.0；[许可原文](licenses/MIUIX-LICENSE) |
+| [Melox](https://github.com/Inefy-03/Melox) | 0.4 Rust UI 的布局与交互研究参考 | 原项目 GPL-3.0；本次独立实现，不引入其源码、截图、图标或其他素材；参考 commit `97cae45b6acf8a0d1a0a89282d1f7ca02d198ad7` |
+| [MIUIX 0.9.5-beta01](https://github.com/compose-miuix-ui/miuix/tree/v0.9.5-beta01) | 原生主题、莫奈取色及视觉规范研究 | Apache-2.0；[许可原文](licenses/MIUIX-LICENSE)；0.4 页面与图标由 Rust UI 独立实现 |
 | [LyriconProvider](https://github.com/limczhh/LyriconProvider) | 系统歌词适配协议与消费链路 | 独立项目，本仓库不包含其模块源码或 APK；以其仓库及适配版本说明为准 |
 
 ## 依赖
 
-Android 与 Rust 依赖分别声明在 [`android/app/build.gradle.kts`](../android/app/build.gradle.kts) 和 [`core/Cargo.toml`](../core/Cargo.toml)，Rust 的锁定版本见 [`Cargo.lock`](../core/Cargo.lock)。第三方依赖继续受各自许可证约束，根目录 MIT 许可不会替换依赖许可证。
+Android 与 Rust 依赖分别声明在 [`android/app/build.gradle.kts`](../android/app/build.gradle.kts)、[`core/Cargo.toml`](../core/Cargo.toml) 和 [`ui/Cargo.toml`](../ui/Cargo.toml)，各 Rust crate 都提供 Cargo.lock。UI 使用 wasm-bindgen / web-sys / js-sys 与 serde_json。第三方依赖继续受各自许可证约束，根目录 MIT 许可不会替换依赖许可证。
 
 Android 依赖包括 Jetpack Compose、AndroidX、Kotlin 协程与 Material 等；Rust 依赖包括 JNI、serde、serde_json、base64、http 与 ureq 及其传递依赖。正式发行前应基于最终依赖树更新完整的依赖许可清单。
 

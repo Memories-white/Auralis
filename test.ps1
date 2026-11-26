@@ -5,6 +5,10 @@ $cargoArgs = @('test', '--manifest-path', (Join-Path $projectRoot 'core\Cargo.to
 if ($Offline) { $cargoArgs += '--offline' }
 Push-Location $projectRoot
 try {
+    $uiArgs = @('test', '--manifest-path', (Join-Path $projectRoot 'ui/Cargo.toml'), '--locked')
+    if ($Offline) { $uiArgs += '--offline' }
+    & cargo @uiArgs
+    if ($LASTEXITCODE -ne 0) { throw 'Rust UI tests failed.' }
     & cargo @cargoArgs
     if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed.' }
     $output = Join-Path $projectRoot 'tools\.test-classes'

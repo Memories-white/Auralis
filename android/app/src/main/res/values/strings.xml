@@ -1,4 +1,13 @@
 <resources>
+    <string name="music_library">音乐库</string>
+    <string name="filter_all">全部</string>
+    <string name="filter_created">我创建的</string>
+    <string name="filter_saved">我收藏的</string>
+    <string name="no_filtered_playlists">这里还没有歌单</string>
+    <string name="change_playlist_filter">切换到其他分类看看</string>
+    <string name="search_results">搜索结果</string>
+    <string name="apply_color">应用</string>
+    <string name="load_more_songs">继续加载歌曲</string>
     <string name="login_qq">登录音乐服务</string>
     <string name="login_qr">QQ 登录二维码</string>
     <string name="get_qr_again">重新获取</string>

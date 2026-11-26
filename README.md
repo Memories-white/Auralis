@@ -4,7 +4,7 @@
 
 **Rust × Android 音频应用学习项目 · 仅供学习与技术研究参考**
 
-[![Version](https://img.shields.io/badge/version-0.3.6-3482FF?style=flat-square)](https://github.com/Memories-white/Auralis/releases/tag/v0.3.6) [![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](docs/BUILD.md) [![Architecture](https://img.shields.io/badge/ABI-arm64--v8a-64748B?style=flat-square)](docs/BUILD.md) [![UI](https://img.shields.io/badge/UI-MIUIX_0.9.5--beta01-3482FF?style=flat-square)](https://compose-miuix-ui.github.io/miuix/zh_CN/) [![License](https://img.shields.io/badge/license-MIT-64748B?style=flat-square)](LICENSE)
+[![Version](https://img.shields.io/badge/stable-0.3.6-3482FF?style=flat-square)](https://github.com/Memories-white/Auralis/releases/tag/v0.3.6) [![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](docs/BUILD.md) [![Architecture](https://img.shields.io/badge/ABI-arm64--v8a-64748B?style=flat-square)](docs/BUILD.md) [![UI](https://img.shields.io/badge/UI-Rust%2FWASM-3482FF?style=flat-square)](ui/README.md) [![License](https://img.shields.io/badge/license-MIT-64748B?style=flat-square)](LICENSE)
 
 [下载安装](https://github.com/Memories-white/Auralis/releases/latest) · [使用指南](docs/USAGE.md) · [本地构建](docs/BUILD.md) · [更新日志](CHANGELOG.md) · [问题反馈](https://github.com/Memories-white/Auralis/issues)
 
@@ -14,9 +14,9 @@
 
 最新修复预览：[0.3.9-preview](https://github.com/Memories-white/Auralis/releases/tag/v0.3.9-preview)。修复“猜你喜欢”内容为空，并支持关闭重开后恢复歌曲、队列与进度。验证范围见[设备记录](design/DEVICE_VALIDATION.md)。稳定版本仍为 0.3.6。
 
-主分支包含 **0.3.10-preview 源码**：歌单点击立即进入、页内加载与失败重试、重复点击抑制及过期响应保护。已通过构建和受控异步回归；第一张推荐歌单的真实账号触控回归待补。当前可下载安装包仍为上面的 0.3.9-preview。
+主分支包含 **0.4.0-preview 源码**：参考 Melox 的页面层次，使用 **Rust/WASM 重构界面布局、交互和歌词动效**。首页、音乐库、搜索、歌单、播放器与设置使用同一套界面；Android 保留主题取色、系统宿主与原有播放服务。构建、交互检查和实机范围见[验证记录](design/DEVICE_VALIDATION.md)。当前已发布安装包仍为上面的 0.3.9-preview。
 
-Auralis 是面向 Android 的音频应用学习项目，使用 **Rust** 探索协议适配与数据处理，使用 **Kotlin / Jetpack Compose** 构建原生界面。界面统一采用 **MIUIX**，用于研究明暗主题、动态配色、同步歌词、后台播放和系统媒体会话。
+Auralis 是面向 Android 的音频应用学习项目，使用 **Rust** 实现界面及协议适配。界面模块编译为 WebAssembly，随 APK 离线打包，由 Android WebView 承载；Kotlin 负责平台桥接、业务状态与播放服务。原生 MIUIX 主题继续提供明暗与莫奈配色，页面布局由 Rust 独立实现。
 
 项目处于持续迭代阶段，当前版本为 **0.3.6**。部分演示功能依赖外部服务及账号授权，受服务条款、地区和内容权益限制；本项目与任何第三方服务提供方均无隶属或官方合作关系。
 
@@ -26,27 +26,20 @@ Auralis 是面向 Android 的音频应用学习项目，使用 **Rust** 探索�
 
 <table>
   <tr>
-    <th width="25%">发现与搜索</th>
+    <th width="25%">首页推荐</th>
     <th width="25%">封面播放器</th>
     <th width="25%">同步歌词</th>
-    <th width="25%">展开歌曲栏</th>
+    <th width="25%">音乐库</th>
   </tr>
   <tr>
-    <td><img src="docs/assets/search-light.png" alt="浅色搜索页：推荐歌手和歌曲" width="240" /></td>
-    <td><img src="docs/assets/player-preview-dark.png" alt="0.3.8-preview 深色封面播放页" width="240" /></td>
-    <td><img src="docs/assets/lyrics-dark.png" alt="清晰当前句、渐进模糊和底部进度" width="240" /></td>
-    <td><img src="docs/assets/expanded-player-dark.png" alt="展开歌曲栏：封面信息、进度和播放控制" width="240" /></td>
+    <td><img src="docs/assets/rust-home-light.png" alt="Rust 首页：每日推荐、封面货架与独立底栏" width="240" /></td>
+    <td><img src="docs/assets/rust-player-light.png" alt="Rust 封面播放器" width="240" /></td>
+    <td><img src="docs/assets/rust-lyrics-light.png" alt="Rust 同步歌词：焦点、模糊和底部进度" width="240" /></td>
+    <td><img src="docs/assets/rust-library-light.png" alt="Rust 音乐库与歌单分类" width="240" /></td>
   </tr>
 </table>
 
-封面播放器截图来自 0.3.8-preview；搜索与歌曲栏来自 0.3.4，歌词来自 0.3.3。图片中的音乐封面属于各自权利人，仅用于展示播放器界面。
-
-<details>
-<summary><b>展开查看歌曲信息页</b></summary>
-
-<img src="docs/assets/song-information-dark.png" alt="歌曲元数据研究界面" width="280" />
-
-</details>
+以上为 **0.4.0-preview 实际 Rust/WASM 渲染截图**，使用自动化检查夹具与本项目绘制的占位封面，不包含真实账号资料。实机加载、播放与歌词验证单独记录，不将测试数据当成服务返回结果。
 
 ## 主要功能
 
@@ -114,21 +107,22 @@ Auralis 是面向 Android 的音频应用学习项目，使用 **Rust** 探索�
 ```text
 Auralis/
 ├── core/                 Rust 协议、数据归一化、音源与歌词
-├── android/              Compose 界面、播放服务、MediaSession
+├── ui/                   Rust/WASM 页面、交互、动效与本机文档入口
+├── android/              WebView / 主题桥接、播放服务、MediaSession
 ├── tools/                播放顺序、缓存等本地检查
 ├── docs/                 使用、构建、架构、截图及许可说明
 ├── design/               设计决策与实机验证记录
 └── build.ps1             Windows Rust + Android 完整构建入口
 ```
 
-准备 JDK 21、Rust Android target、Android SDK 37.2 和 NDK 27+ 后，在项目根目录运行：
+准备 JDK 21、Rust Android / WASM target、wasm-bindgen-cli 0.2.108、Android SDK 37.2 和 NDK 27+ 后，在项目根目录运行：
 
 ```powershell
 rustup target add aarch64-linux-android
 .\build.ps1
 ```
 
-脚本先构建 Rust 动态库，再打包 Android APK。首次构建需联网获取依赖；离线构建、工具链版本与测试命令见 [构建指南](docs/BUILD.md)。生成的动态库、APK、账号数据及本机 SDK 配置均不提交到源码仓库。
+脚本先构建 Rust/WASM 界面和 Rust 动态库，再打包 Android APK。首次构建需联网获取依赖；离线构建、工具链版本与测试命令见 [构建指南](docs/BUILD.md)。生成的模块、动态库、APK、账号数据及本机 SDK 配置均不提交到源码仓库。
 
 ## 当前限制
 
@@ -153,7 +147,8 @@ rustup target add aarch64-linux-android
 
 ## 致谢与许可
 
-- [MIUIX](https://github.com/compose-miuix-ui/miuix)：原生 Compose 组件、主题和设计规范。
+- [MIUIX](https://github.com/compose-miuix-ui/miuix)：原生主题、莫奈取色和设计规范。
+- [Melox](https://github.com/Inefy-03/Melox)：0.4 界面结构与交互研究参考，按 Rust 要求独立实现。
 - [Melodist](https://github.com/Viemean/melodist)：账号登录 / API 调用研究与首页布局参考。
 - [LyriconProvider](https://github.com/limczhh/LyriconProvider)：系统歌词适配与发布链路参考。
 - Rust、Jetpack Compose 及其他依赖的贡献者。

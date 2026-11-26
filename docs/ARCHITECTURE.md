@@ -1,16 +1,18 @@
 # 架构说明
 
-[← 返回首页](../README.md) · [构建指南](BUILD.md) · [设计决策](../design/DESIGN.md)
+[← 返回首页](../README.md) · [构建指南](BUILD.md) · [Rust UI](../ui/README.md)
 
 ## 数据与播放链路
 
 ```mermaid
 flowchart TD
-    UI[Compose / MIUIX 页面] --> State[MusicState]
+    UI[Rust / WASM 页面与交互] --> Host[Android WebView / RustHost]
+    Theme[原生 MIUIX / 莫奈主题] --> UI
+    Host --> State[MusicState]
     State --> JNI[RustCore / JNI]
-    JNI --> Core[Rust QQ 协议与数据归一化]
+    JNI --> Core[Rust 服务协议与数据归一化]
     Core --> HTTP[AndroidHttp 系统 HTTPS]
-    HTTP --> QQ[音乐服务]
+    HTTP --> ServiceAPI[音乐服务]
     State --> Service[PlayerService]
     Service --> Player[Android MediaPlayer]
     Service --> Session[Framework MediaSession]
@@ -19,50 +21,49 @@ flowchart TD
     Provider --> Consumer[兼容的系统歌词消费端]
 ```
 
-Rust 负责请求参数、响应解析、登录状态、曲库、搜索、授权播放地址与歌词数据。Android 网络适配器提供系统 DNS / 代理 / TLS 通道，播放器负责流式播放授权地址。
+Rust UI crate 负责页面、事件和动效，core crate 继续负责协议、登录、曲库、搜索、授权播放地址与歌词。Android 提供系统 DNS / 代理 / TLS 通道和播放服务。0.4 UI 重构没有重写协议或播放服务。
 
 ## 模块边界
 
 | 位置 | 责任 |
 | :-- | :-- |
-| `core/src/lib.rs` | 服务接口、数据模型归一化、音质候选与响应选择、JNI 入口 |
-| `core/src/discovery.rs` | 个性化歌曲货架分页、每日 / 已展示排除、云端添加及成员核对 |
+| `ui/src/presentation.rs` | 页面层次、分组、内容顺序、设置依赖及操作描述 |
+| `ui/src/render.rs` / `style.css` | Rust DOM 构建、视觉样式、播放器与弹层 |
+| `ui/src/lib.rs` | 点击、键盘、手势、页面滚动、歌词弹簧与瞬时 UI 状态 |
+| `ui/src/labels.rs` | 字符串复用、参数格式化及外部内容转义 |
+| `MainActivity.kt` | Android 生命周期与媒体通知打开播放器的入口 |
+| `RustWebView.kt` | 本机资源、状态快照、业务动作及窗口 / 主题桥接 |
+| `MusicState.kt` | 原有业务状态、账号、异步结果、队列与偏好 |
+| `core/src/lib.rs` | 服务接口、模型归一化、音质响应选择与 JNI |
+| `core/src/discovery.rs` | 推荐分页、每日排除、云端添加与成员核对 |
 | `core/src/android_http.rs` | Rust 到 Android HTTPS 的桥接 |
-| `MusicState.kt` | 页面业务状态、账号、异步结果、队列与偏好 |
-| `MainActivity.kt` | 唯一主题、页面宿主、导航、弹层、歌曲栏与完整播放器 |
-| `DiscoveryContent.kt` | 首页与搜索的列表内容，复用宿主滚动和 inset |
-| `LibraryPages.kt` | 音乐库、最近播放与歌单概览内容，复用宿主列表 |
-| `PlayerScreen.kt` | 封面 / 信息 / 歌词分页、播放器布局与操作入口 |
-| `PlayerService.kt` | 后台播放、媒体会话、音质重载与播放状态快照 |
-| `ListeningHistory.kt` | 有界本机最近播放，仅存歌曲元数据 |
-| `PlaybackStore.kt` | 版本化的最后歌曲 / 队列 / 进度快照，元数据白名单与有界队列 |
-| `SleepTimer.java` / `TimerControls.kt` | 单调时钟定时状态机与 MIUIX 选择面板 |
-| `SynchronizedLyrics.kt` | 播放定位、手动浏览恢复、逐行位移 / 缩放 / 模糊 |
-| `ThinSeekBar.kt` | 播放进度绘制、拖动、键盘及无障碍控制 |
-| `PlaybackOrder.java` | 顺序、循环和随机遍历 / 历史，不依赖网络 |
+| `PlayerService.kt` | 后台播放、媒体会话、音质重载及原子状态快照 |
+| `PlaybackStore.kt` / `ListeningHistory.kt` | 有界队列 / 进度恢复与本机最近播放 |
+| `PlaybackOrder.java` / `SleepTimer.java` | 播放顺序与单调时钟定时状态机 |
 | `MonetAppearance.kt` | MIUIX 主题控制器、色源与色板 |
 | `ArtworkCache.kt` / `ArtworkDiskStore.java` | 有界内存与 WebP 磁盘缓存 |
 | `SecureStore.kt` | Android Keystore 加密凭据存储 |
 
-仓库保留部分早期 View 辅助类用于历史实现参考，当前 Manifest 主入口为 Compose `MainActivity`；不要据此判断当前仍提供多套主题。
+原 Kotlin 页面和历史 View 界面已移除。Compose 仅在宿主边界解析现有主题与窗口信息；实际页面由 Rust/WASM 构建，没有并行的旧页面或第二个播放服务。
 
-## 一致性与生命周期
+## 状态与生命周期
 
-- 歌曲选择使用独立请求标识，服务通过原子快照发布播放状态，防止旧歌词或音源覆盖新选择。
-- 搜索、歌单和登录拥有独立代次检查；搜索结果与歌单条目分别保存。
-- 音质切换成功后按回调时的位置和暂停状态重建音源，失败保留当前播放；旧请求不会覆盖更新的选择。
-- 系统歌词发布歌曲身份、原文、翻译和播放时间戳；协议层能力与消费端显示策略分开验证。
-- 个性化推荐在独立线程执行，页码单调推进，失败等待重试；云端写入区分服务受理与成员确认。
-- 凭据保存在应用私有存储并加密，图片缓存与收藏等普通偏好分开管理。
-- 最近播放在 MediaPlayer 成功开始后由服务写入，按曲目标识去重、最多 100 首；音质重载及暂停恢复沿用请求标识，避免重复记录。
-- 睡眠定时只由服务持有，以 elapsedRealtime 计算，UI 读取原子快照。到期先使异步切歌 / 音质请求失效再暂停；当前曲目结束模式先于自动下一首判断。定时不跨进程保存。
-- 恢复记录由播放服务在成功准备后更新，位置定期及关键操作保存；MusicState 在没有有效服务快照时读取本地记录。服务首次收到播放动作时从安全存储读取当前账号并重新获取音源，沿用请求代次，异步旧结果不会覆盖新选择。启动只恢复显示，服务真实状态优先。
-- 首页推荐卡携带稳定的 kind。猜你喜欢进入独立推荐协议，普通歌单保留原详情链路；返回曲目使用同一归一化与去重逻辑。
+- 现有 MusicState 保持业务与导航状态所有权。Rust 中的筛选、弹层、手势与动画状态不复制账号或播放服务。
+- 歌曲、搜索、歌单和登录使用各自请求代次；迟到结果不能覆盖新选择。歌单保持立即进入、页内加载 / 错误 / 重试，普通歌单和专属推荐保留各自协议入口。
+- 音质切换成功后按回调时的位置和暂停状态重建音源，失败保留当前播放。播放服务继续发布系统歌词、媒体通知和会话令牌。
+- 最近播放只在音频成功开始后记录，最多 100 首。恢复记录采用白名单元数据、最多 500 首队列与进度，不保存授权音源或凭据；冷启动默认暂停，后台有效服务状态优先。
+- 睡眠定时只由服务持有，以 elapsedRealtime 计时；当前曲目结束模式先于循环和自动下一首，取消尚未完成的切歌请求。定时不跨进程保存。
+- UI 结构性数据变化才重绘页面，播放进度使用轻量消息。大歌单先显示 100 首，接近底部继续展开，定位当前歌曲会先展开对应区域。
+- 生命周期暂停时停止 UI 采样与 WebView 计时；旋转在同一宿主实例内适配，保持当前页。系统栏、IME、横向 cutout 与内容安全区由宿主交接。
 
-## UI 与动效
+## 界面与资源边界
 
-单一 `MiuixTheme` 管理明暗与莫奈色。页面宿主负责系统栏、底栏和滚动，不在每个内容模块重复创建 Scaffold。完整播放器从歌曲栏位置展开；歌曲栏自身使用同一动画进度协调高度、封面和唯一进度轨道。
+单一 MiuixTheme 管理明暗与莫奈色，通过语义颜色传给 Rust UI。Rust 管理顶栏、底栏、页面滚动和宽屏侧边导航。完整播放器以歌曲栏真实矩形作为展开 / 收回起点；歌曲栏保留一条随高度移动的进度轨道。
 
-歌词使用 lazy 布局与逐行 FLIP 位移，保留可打断的弹簧速度；清晰焦点、渐进模糊与视口渐隐分别处理。遵循系统动画时长设置，不伪造逐字时间轴。
+歌词按播放毫秒定位，Rust 动画帧实现弹簧滚动，CSS 完成当前句缩放、按距离渐进模糊和视口渐隐。手动浏览结束后约 1.8 秒恢复跟随；系统关闭动画时直接定位，不伪造逐字时间轴。
 
-详细参数、设备绘制回退和各版本实测范围分别记录于 [设计说明](../design/DESIGN.md) 与 [设备验证](../design/DEVICE_VALIDATION.md)。
+WebView 仅加载 APK 内的本机 HTTPS 资源映射，禁止远程导航和直接联网。UI 接收必要元数据及状态，不接收 Cookie、音乐密钥或授权音源；封面继续走原有缓存。内容和属性经过转义，生成绑定与启动胶水不包含页面交互实现。
+
+本次以 Rust UI 为明确要求，因此参考 MIUIX / Melox 的视觉结构，独立实现页面与控件；原生 MIUIX 库仅提供主题能力，没有将自绘页面描述为库内原生组件。
+
+实测与未覆盖范围见[设备记录](../design/DEVICE_VALIDATION.md)。
