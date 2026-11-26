@@ -35,6 +35,7 @@ class PlaybackSmokeTest : Instrumentation() {
     private fun status(message:String) { sendStatus(0,Bundle().apply{putString("stream","$message\n")}) }
 
     override fun onStart() {
+        if(mode=="playlist"){runPlaylistOpenChecks();return}
         if(mode=="restore"){runPlaybackRestoreChecks();return}
         val context=targetContext
         val prefs=context.getSharedPreferences("library",0)

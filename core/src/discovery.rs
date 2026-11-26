@@ -16,28 +16,21 @@ pub fn guess(input: &Value) -> Result<Value, String> {
     }
     let mut excluded: HashSet<String> = input["exclude"].as_array().into_iter().flatten()
         .filter_map(Value::as_str).map(str::to_owned).collect();
-    let mut songs = Vec::new();
-    for _ in 0..3 {
-        let batch = (|| {
-            let root = gateway(json!({"comm":{"uin":field(session,"uin"),"authst":field(session,"musicKey"),"format":"json","ct":19,"cv":1},
-                "guess":{"module":"music.radioProxy.MbTrackRadioSvr","method":"get_radio_track","param":{"id":99,"num":15,"from":0,"scene":0,"song_ids":[]}}}), &session["cookies"])?;
-            if number(&root["code"]).unwrap_or(0) != 0 || number(&root["guess"]["code"]) != Some(0) {
-                return Err("猜你喜欢暂不可用，请刷新或重新登录".to_owned());
-            }
-            let tracks = &root["guess"]["data"]["tracks"];
-            if !tracks.is_array() { return Err("推荐服务未返回歌曲列表，请重试".to_owned()); }
-            Ok(filtered_tracks(tracks, &mut excluded, &HashSet::new()))
-        })();
-        match batch {
-            Ok(items) => songs.extend(items),
-            Err(error) if songs.is_empty() => return Err(error),
-            Err(_) => break,
-        }
-        if songs.len() >= 30 { break; }
-    }
+    // One batch per open. A retry belongs to a new explicit request from the page.
+    let root = gateway(json!({"comm":{"uin":field(session,"uin"),"authst":field(session,"musicKey"),"format":"json","ct":19,"cv":1},
+        "guess":{"module":"music.radioProxy.MbTrackRadioSvr","method":"get_radio_track","param":{"id":99,"num":15,"from":0,"scene":0,"song_ids":[]}}}), &session["cookies"])?;
+    let mut songs = guess_tracks(&root, &mut excluded)?;
     if songs.is_empty() { return Err("猜你喜欢暂时没有新歌曲，请稍后刷新".into()); }
     songs.truncate(30);
     Ok(json!(songs))
+}
+fn guess_tracks(root: &Value, excluded: &mut HashSet<String>) -> Result<Vec<Value>, String> {
+    if number(&root["code"]).unwrap_or(0) != 0 || number(&root["guess"]["code"]) != Some(0) {
+        return Err("猜你喜欢暂不可用，请刷新或重新登录".into());
+    }
+    let tracks = &root["guess"]["data"]["tracks"];
+    if !tracks.is_array() { return Err("推荐服务未返回歌曲列表，请重试".into()); }
+    Ok(filtered_tracks(tracks, excluded, &HashSet::new()))
 }
 
 // Only personalized song shelves contain song IDs. Playlist and daily cards must
@@ -194,6 +187,17 @@ mod tests {
         let playlist = recommendation_card(&json!({"title":"每日30首","id":123,"miscellany":{"dirid":202}}));
         assert_eq!(playlist["kind"], "playlist");
         assert_eq!(playlist["dirid"], 202);
+    }
+    #[test]
+    fn guess_rejects_failures_and_normalizes_one_batch() {
+        let mut excluded = HashSet::from(["daily".to_owned()]);
+        assert!(guess_tracks(&json!({"code":0,"guess":{"code":1}}), &mut excluded).is_err());
+        assert!(guess_tracks(&json!({"code":0,"guess":{"code":0,"data":{}}}), &mut excluded).is_err());
+        let result = guess_tracks(&json!({"code":0,"guess":{"code":0,"data":{"tracks":[
+            {"mid":"daily","id":1},{"mid":"new","id":2,"title":"New"},{"mid":"new","id":2}
+        ]}}}), &mut excluded).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0]["title"], "New");
     }
     #[test]
     fn only_personalized_song_shelves() {

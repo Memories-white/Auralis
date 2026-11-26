@@ -172,7 +172,7 @@ class MainActivity:ComponentActivity(){
                 "recent"->recentListening(m,clearRecent)
                 "songs"->{
                     item("playlist-count"){PlaylistOverview(m)}
-                    if(m.tracks.isEmpty())item("songs-empty"){EmptyMessage(stringResource(R.string.no_songs),stringResource(R.string.retry_later))}
+                    if(m.tracks.isEmpty()&&!m.detailLoading&&m.detailError.isBlank())item("songs-empty"){EmptyMessage(stringResource(R.string.no_songs),stringResource(R.string.retry_later))}
                     itemsIndexed(m.tracks,key={i,s->"song:${s.optString("mid")}:$i"}){i,song->SongRow(song,playingSong(m,song)){m.play(m.tracks,i)}}
                 }
             }

@@ -13,8 +13,8 @@ android {
         applicationId = "dev.qqlyric.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 19
-        versionName = "0.3.9-preview"
+        versionCode = 20
+        versionName = "0.3.10-preview"
         testInstrumentationRunner = "dev.qqlyric.app.PlaybackSmokeTest"
         ndk { abiFilters += "arm64-v8a" }
     }

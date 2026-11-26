@@ -10,7 +10,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.basic.*
@@ -95,13 +95,21 @@ fun LazyListScope.recentListening(m:MusicState,clear:()->Unit){
         Row(Modifier.padding(20.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(16.dp)){
             Artwork(m.detailCover,m.detailTitle,Modifier.size(80.dp).clip(RoundedCornerShape(14.dp)))
             Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(10.dp)){
-                Text(stringResource(R.string.loaded_songs,m.tracks.size),style=MiuixTheme.textStyles.title3)
-                Text(stringResource(R.string.playlist_ready),style=MiuixTheme.textStyles.footnote1,color=MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                Text(if(m.detailLoading)stringResource(R.string.loading_playlist)else if(m.detailError.isNotBlank())stringResource(R.string.playlist_load_failed)else stringResource(R.string.loaded_songs,m.tracks.size),style=MiuixTheme.textStyles.title3)
+                Text(stringResource(if(m.detailLoading)R.string.playlist_loading_hint else if(m.detailError.isNotBlank())R.string.playlist_retry_hint else R.string.playlist_ready),style=MiuixTheme.textStyles.footnote1,color=MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
         }
+        if(m.detailLoading)Row(Modifier.fillMaxWidth().padding(horizontal=20.dp).padding(bottom=20.dp).semantics{liveRegion=LiveRegionMode.Polite},verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)){
+            InfiniteProgressIndicator(color=MiuixTheme.colorScheme.primary,modifier=Modifier.semantics{progressBarRangeInfo=ProgressBarRangeInfo.Indeterminate})
+            Text(stringResource(R.string.playlist_loading_hint),style=MiuixTheme.textStyles.footnote1,color=MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        }
+        if(m.detailError.isNotBlank())Column(Modifier.fillMaxWidth().padding(horizontal=20.dp).padding(bottom=20.dp).semantics{liveRegion=LiveRegionMode.Polite},verticalArrangement=Arrangement.spacedBy(12.dp)){
+            Text(m.detailError,style=MiuixTheme.textStyles.footnote1,color=MiuixTheme.colorScheme.onSurfaceVariantSummary)
+            TextButton(stringResource(R.string.retry),m::retryPlaylist)
+        }
         Row(Modifier.fillMaxWidth().padding(horizontal=16.dp).padding(bottom=16.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)){
-            TextButton(stringResource(R.string.play_all),{m.play(m.tracks,0)},Modifier.weight(1f),enabled=m.tracks.isNotEmpty())
-            TextButton(stringResource(R.string.shuffle_play),{if(m.tracks.isNotEmpty()){m.choosePlaybackMode("SHUFFLE");m.play(m.tracks,m.tracks.indices.random())}},Modifier.weight(1f),enabled=m.tracks.isNotEmpty())
+            TextButton(stringResource(R.string.play_all),{m.play(m.tracks,0)},Modifier.weight(1f),enabled=m.tracks.isNotEmpty()&&!m.detailLoading)
+            TextButton(stringResource(R.string.shuffle_play),{if(m.tracks.isNotEmpty()){m.choosePlaybackMode("SHUFFLE");m.play(m.tracks,m.tracks.indices.random())}},Modifier.weight(1f),enabled=m.tracks.isNotEmpty()&&!m.detailLoading)
         }
     }
 }

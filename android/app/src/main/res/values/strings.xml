@@ -212,4 +212,9 @@
     <string name="sleep_requires_song">先播放一首歌，再设置暂停时间。</string>
     <string name="sleep_lifecycle">由后台播放服务计时，退出播放页后继续运行。停止播放服务或重启应用进程后自动取消。</string>
     <string name="qr_network_retry">网络暂时不稳定，正在重试登录状态…</string>
+    <string name="playlist_load_failed">歌单加载失败</string>
+    <string name="playlist_loading_hint">正在获取歌曲，请稍候…</string>
+    <string name="playlist_retry_hint">可以重试，或返回选择其他歌单。</string>
+    <string name="playlist_invalid">这个入口没有有效的歌单编号，请返回并刷新推荐。</string>
+    <string name="playlist_response_invalid">服务未返回有效歌曲列表，请重试。</string>
 </resources>

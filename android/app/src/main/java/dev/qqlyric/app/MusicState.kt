@@ -17,9 +17,10 @@ fun JSONObject.artwork():String=optString("coverUrl").takeIf{it.startsWith("http
     ?: optString("albumMid").takeIf{it.isNotBlank()}?.let{"https://y.gtimg.cn/music/photo_new/T002R500x500M000$it.jpg"} ?: ""
 
 /** Account/protocol state stays independent of the Compose page tree. */
-class MusicState(private val context:Context){
+class MusicState(private val context:Context,private val protocol:(String,String)->String={name,input->RustCore.call(name,input)}){
     private val worker=Executors.newSingleThreadExecutor()
     private val feedWorker=Executors.newSingleThreadExecutor()
+    private val detailWorker=Executors.newSingleThreadExecutor()
     private val ui=Handler(Looper.getMainLooper())
     private val secure=SecureStore(context)
     private val prefs=context.getSharedPreferences("library",Context.MODE_PRIVATE)
@@ -45,6 +46,10 @@ class MusicState(private val context:Context){
     var collectionBusy by mutableStateOf(false)
     var collectionMessage by mutableStateOf("")
     var detailRevision by mutableIntStateOf(0)
+    var detailLoading by mutableStateOf(false)
+    var detailError by mutableStateOf("")
+    private data class DetailRequest(val kind:String,val id:Long,val dirid:Long,val title:String,val cover:String,val excluded:List<String> = emptyList())
+    private var detailRequest:DetailRequest?=null
     private val backStack=mutableListOf<String>()
     private var pendingMid:String?=null
     private var pendingToken:String?=null
@@ -105,8 +110,9 @@ class MusicState(private val context:Context){
     init{prefs.registerOnSharedPreferenceChangeListener(historyListener);playbackPrefs.registerOnSharedPreferenceChangeListener(playbackListener);prefs.edit().putString("ui_style","MIUIX").apply();refreshHome();if(loggedIn)refreshProfile()}
     private fun call(name:String,args:JSONObject=JSONObject(),done:(JSONObject)->Unit){
         val expected=epoch
-        (if(name=="recommend")feedWorker else worker).execute{
-            val response=runCatching{JSONObject(RustCore.call(name,args.toString()))}.getOrElse{JSONObject().put("ok",false).put("error",it.message?:context.getString(R.string.request_failed))}
+        val input=args.toString()
+        (when(name){"recommend"->feedWorker;"guess","playlist"->detailWorker;else->worker}).execute{
+            val response=runCatching{JSONObject(protocol(name,input))}.getOrElse{JSONObject().put("ok",false).put("error",it.message?:context.getString(R.string.request_failed))}
             ui.post{if(alive&&expected==epoch)done(response)}
         }
     }
@@ -158,23 +164,21 @@ class MusicState(private val context:Context){
     fun navigate(destination:String){
         if(destination==page)return
         playlistGeneration++;searchGeneration++
+        if(destination!="songs")cancelDetail()
         if(destination=="home"||destination=="mine")backStack.clear() else backStack.add(page)
         page=destination;status="";busy=false
         if(destination=="mine"&&loggedIn&&library.length()==0)refreshLibrary()
     }
-    fun back(){playlistGeneration++;searchGeneration++;page=if(backStack.isNotEmpty())backStack.removeAt(backStack.lastIndex)else "home";status="";busy=false}
-    fun openSongs(songs:List<JSONObject>,label:String,cover:String=""){if(page!="songs")parentPage=page;detailTitle=label;detailCover=cover.ifBlank{songs.firstOrNull()?.artwork().orEmpty()};tracks=songs;detailRevision++;navigate("songs")}
+    private fun cancelDetail(){detailLoading=false;detailError="";detailRequest=null}
+    fun back(){playlistGeneration++;searchGeneration++;cancelDetail();page=if(backStack.isNotEmpty())backStack.removeAt(backStack.lastIndex)else "home";status="";busy=false}
+    fun openSongs(songs:List<JSONObject>,label:String,cover:String=""){playlistGeneration++;cancelDetail();if(page!="songs")parentPage=page;detailTitle=label;detailCover=cover.ifBlank{songs.firstOrNull()?.artwork().orEmpty()};tracks=songs;detailRevision++;navigate("songs")}
     fun daily(){
         val songs=home.optJSONArray("daily")?.objects().orEmpty()
         if(songs.isNotEmpty())openSongs(songs,context.getString(R.string.daily_mix))
         else if(!loggedIn)login()else if(home.optLong("dailyId")>0)playlist(home.optLong("dailyId"),0,context.getString(R.string.daily_mix))else refreshHome()
     }
     fun playlist(id:Long,dirid:Long,label:String,cover:String=""){
-        val request=++playlistGeneration;busy=true;status=context.getString(R.string.loading_playlist)
-        call("playlist",JSONObject().put("id",id).put("dirid",dirid).put("session",session)){result->
-            if(request!=playlistGeneration)return@call
-            busy=false;if(!failed(result)){openSongs(result.getJSONArray("data").objects(),label,cover);status=""}
-        }
+        loadDetail(DetailRequest("playlist",id,dirid,label,cover.takeUnless{it=="null"}.orEmpty()))
     }
     fun recommendedPlaylist(card:JSONObject){
         val title=card.optString("title")
@@ -182,14 +186,35 @@ class MusicState(private val context:Context){
             playlist(card.optLong("id"),card.optLong("dirid"),title,card.optString("cover"));return
         }
         if(!loggedIn){login();return}
-        val request=++playlistGeneration;busy=true;status=context.getString(R.string.loading_playlist)
         val excluded=home.optJSONArray("daily")?.objects().orEmpty().map{it.optString("mid")}
-        call("guess",JSONObject().put("session",session).put("exclude",JSONArray(excluded))){result->
-            if(request!=playlistGeneration)return@call
-            busy=false
-            if(!failed(result)){openSongs(result.getJSONArray("data").objects(),title,card.optString("cover").takeUnless{it=="null"}.orEmpty());status=""}
+        loadDetail(DetailRequest("guess",0,0,title,card.optString("cover").takeUnless{it=="null"}.orEmpty(),excluded))
+    }
+    private fun loadDetail(source:DetailRequest){
+        if(detailLoading&&page=="songs"&&detailRequest==source)return
+        if(!loggedIn){login();return}
+        openSongs(emptyList(),source.title,source.cover)
+        val request=++playlistGeneration
+        detailRequest=source;status="";detailLoading=true
+        if(source.kind=="playlist"&&source.id<=0&&source.dirid<=0){
+            detailLoading=false;detailError=context.getString(R.string.playlist_invalid);return
+        }
+        val args=JSONObject().put("session",session).put("id",source.id).put("dirid",source.dirid).put("exclude",JSONArray(source.excluded))
+        if(BuildConfig.DEBUG)android.util.Log.d("AuralisPlaylist","open kind=${source.kind} generation=$request")
+        call(source.kind,args){result->
+            if(request!=playlistGeneration||page!="songs"||detailRequest!=source)return@call
+            detailLoading=false
+            if(!result.optBoolean("ok")){
+                detailError=displayError(result.optString("error",context.getString(R.string.request_retry)))
+            }else{
+                val songs=result.optJSONArray("data")
+                if(songs==null){detailError=context.getString(R.string.playlist_response_invalid);return@call}
+                tracks=songs.objects()
+                if(detailCover.isBlank())detailCover=tracks.firstOrNull()?.artwork().orEmpty()
+                if(BuildConfig.DEBUG)android.util.Log.d("AuralisPlaylist","loaded kind=${source.kind} count=${tracks.size} generation=$request")
+            }
         }
     }
+    fun retryPlaylist(){if(!detailLoading)detailRequest?.let(::loadDetail)}
     fun search(){
         val query=searchText.trim();if(query.isEmpty())return
         searchHistory=(listOf(query)+searchHistory.filterNot{it==query}).take(8)
@@ -344,6 +369,6 @@ class MusicState(private val context:Context){
         }
     }
     fun dismissLogin(){loginGeneration++;qrOpen=false}
-    fun logout(){homeGeneration++;feedGeneration++;discoverySongs=emptyList();discoveryLoading=false;discoveryMore=true;discoveryError="";collectionBusy=false;collectionMessage="";epoch++;loginGeneration++;playGeneration++;pendingMid=null;pendingToken=null;backStack.clear();secure.clear();session=JSONObject();profile=JSONObject();loggedIn=false;home=JSONObject();library=JSONObject();page="home";status=context.getString(R.string.logged_out);command("STOP")}
-    fun close(){prefs.unregisterOnSharedPreferenceChangeListener(historyListener);playbackPrefs.unregisterOnSharedPreferenceChangeListener(playbackListener);alive=false;loginGeneration++;worker.shutdownNow();feedWorker.shutdownNow();ui.removeCallbacksAndMessages(null)}
+    fun logout(){cancelDetail();homeGeneration++;feedGeneration++;discoverySongs=emptyList();discoveryLoading=false;discoveryMore=true;discoveryError="";collectionBusy=false;collectionMessage="";epoch++;loginGeneration++;playGeneration++;pendingMid=null;pendingToken=null;backStack.clear();secure.clear();session=JSONObject();profile=JSONObject();loggedIn=false;home=JSONObject();library=JSONObject();page="home";status=context.getString(R.string.logged_out);playbackStatus="";command("STOP")}
+    fun close(){prefs.unregisterOnSharedPreferenceChangeListener(historyListener);playbackPrefs.unregisterOnSharedPreferenceChangeListener(playbackListener);alive=false;loginGeneration++;worker.shutdownNow();feedWorker.shutdownNow();detailWorker.shutdownNow();ui.removeCallbacksAndMessages(null)}
 }
