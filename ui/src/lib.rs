@@ -19,6 +19,7 @@ struct App {
     painted_route: String,
     sheet: String,
     sheet_stack: Vec<String>,
+    painted_overlay: Option<render::Overlay>,
     player: bool,
     player_page: usize,
     scrolls: HashMap<String, i32>,
@@ -315,6 +316,7 @@ pub fn update(input: &str) {
                         app.active_line = None;
                         if matches!(app.sheet.as_str(), "song-actions" | "add-playlist") {
                             app.sheet.clear();
+                            app.sheet_stack.clear();
                             app.paint_overlay();
                         }
                     }
@@ -480,7 +482,9 @@ impl App {
             .strip_prefix("add:")
             .and_then(|s| s.parse::<i64>().ok())
         {
-            post(json!({"type":"add_cloud","mid":s(&self.live,"mid"),"dirid":dirid}));
+            if !b(&self.data, "collectionBusy") {
+                post(json!({"type":"add_cloud","mid":s(&self.live,"mid"),"dirid":dirid}));
+            }
             return;
         }
         if let Some(query) = action.strip_prefix("query:") {
@@ -604,7 +608,7 @@ impl App {
                     post(json!({"type":"prepare_actions"}));
                 }
                 self.paint_overlay();
-                if action == "add-playlist" {
+                if action == "add-playlist" && !b(&self.data, "libraryReady") {
                     post(json!({"type":"refresh_library"}));
                 }
             }
@@ -839,16 +843,32 @@ impl App {
             }
         }
     }
-    fn paint_overlay(&self) {
-        set_html(
-            "overlays",
-            &render::overlay(
-                &self.sheet,
-                &self.data,
-                &self.live,
-                !self.sheet_stack.is_empty(),
-            ),
-        );
+    fn paint_overlay(&mut self) {
+        let next = render::overlay(&self.sheet, &self.data, &self.live, !self.sheet_stack.is_empty());
+        match (&self.painted_overlay, &next) {
+            (Some(old), Some(new)) if old.class == new.class => {
+                if old.title != new.title {
+                    if let Some(sheet) = el("sheet") {
+                        let _ = sheet.set_attribute("aria-label", &new.title);
+                    }
+                }
+                if old.header != new.header {
+                    set_html("sheet-header", &new.header);
+                }
+                if old.items != new.items {
+                    set_html("sheet-items", &new.items);
+                }
+                if old.message != new.message {
+                    if let Some(message) = el("sheet-message") {
+                        message.set_text_content(Some(&new.message));
+                    }
+                }
+            }
+            (_, Some(new)) => set_html("overlays", &new.markup()),
+            (Some(_), None) => set_html("overlays", ""),
+            (None, None) => {}
+        }
+        self.painted_overlay = next;
     }
     fn paint_progress(&self) {
         let duration = n(&self.live, "duration").max(0);

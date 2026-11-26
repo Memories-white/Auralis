@@ -14,6 +14,8 @@ use std::{
 const GATEWAY: &str = "https://u.y.qq.com/cgi-bin/musicu.fcg";
 mod discovery;
 mod artwork;
+mod playlist;
+use playlist::load as playlist;
 const AGENT: &str = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36";
 
 #[cfg(any(target_os = "android", test))]
@@ -367,14 +369,11 @@ fn normalize_song(raw: &Value) -> Option<Value> {
     } else {
         media_mid
     };
-    let id = song
-        .get("id")
-        .or_else(|| song.get("songid"))
-        .cloned()
-        .unwrap_or(json!(0));
+    let id = ["id", "songid"].iter().find_map(|key| number(&song[*key]).filter(|id| *id > 0)).unwrap_or(0);
+    let song_type = ["type", "songType", "songtype"].iter().find_map(|key| number(&song[*key]).filter(|kind| *kind >= 0));
     let duration = song.get("interval").cloned().unwrap_or(json!(0));
     Some(
-        json!({"mid":mid,"id":id,"title":title,"artist":artists,"album":album,
+        json!({"mid":mid,"id":id,"songType":song_type,"title":title,"artist":artists,"album":album,
         "albumMid":album_mid,"coverUrl":if album_mid.is_empty(){String::new()}else{format!("https://y.gtimg.cn/music/photo_new/T002R300x300M000{album_mid}.jpg")},"mediaMid":if media_mid.is_empty(){mid}else{media_mid},
         "duration":duration,"vip":song["pay"]["pay_play"].as_i64()==Some(1)}),
     )
@@ -402,13 +401,17 @@ fn select_playback(root: &Value, preference: &str, fallback: bool) -> Result<Val
     }
     Err(format!("所选音质未返回可用音源（网关 {}；{}）。请检查账号权益或选择其他音质。",root["code"],diagnostics.join("；")))
 }
+fn song_detail_query(mid: &str) -> Value {
+    json!({"songinfo":{"module":"music.pf_song_detail_svr","method":"get_song_detail_yqq","param":{"song_mid":mid}}})
+}
+
 fn play_url(song: &Value, session: &Value, preference: &str, fallback: bool) -> Result<Value, String> {
     let qualities = quality_candidates(preference, fallback)?;
     let mid = field(song, "mid");
     if mid.is_empty() {
         return Err("缺少 songMid".into());
     }
-    let detail=gateway(json!({"songinfo":{"module":"music.pf_song_detail_svr","method":"get_song_detail_yqq","param":{"song_mid":mid}}}),&session["cookies"]).ok();
+    let detail = gateway(song_detail_query(mid), &session["cookies"]).ok();
     let resolved = detail
         .as_ref()
         .map(|v| field(&v["songinfo"]["data"]["track_info"]["file"], "media_mid"))
@@ -507,18 +510,10 @@ fn account_request(session: &Value, requests: Value) -> Result<Value, String> {
     let mut payload = requests;
     payload["comm"] = json!({"uin":field(session,"uin"),"authst":field(session,"musicKey"),"ct":20,"cv":1770,"format":"json","platform":"wk_v17"});
     let root = gateway(payload, &session["cookies"])?;
-    if root["code"].as_i64().unwrap_or(0) != 0 {
+    if number(&root["code"]).unwrap_or(0) != 0 {
         return Err("音乐服务登录已失效或请求被拒绝，请重新登录".into());
     }
     Ok(root)
-}
-fn songs_in(data: &Value, key: &str) -> Result<Value, String> {
-    let list = data[key]
-        .as_array()
-        .ok_or("音乐服务未返回歌曲列表，请刷新或重新登录")?;
-    Ok(Value::Array(
-        list.iter().filter_map(normalize_song).collect(),
-    ))
 }
 fn normalized_profile(session: &Value, root: &Value) -> Value {
     let info = &root["profile"]["data"]["Info"]["BaseInfo"];
@@ -562,15 +557,24 @@ fn profile(session: &Value) -> Result<Value, String> {
 }
 fn library(session: &Value) -> Result<Value, String> {
     let uin = field(session, "uin");
-    let root = account_request(
+    let source = playlist::Source::Directory(201);
+    let mut root = account_request(
         session,
         json!({
-            "likes":{"module":"music.musicasset.PlaylistDetailRead","method":"GetUniformSongDetailInfo","param":{"uin":uin,"dirid":201,"bPaged":true,"offset":0,"size":100}},
+            "likes":source.query(uin, 0),
             "created":{"module":"music.musicasset.PlaylistBaseRead","method":"GetPlaylistByUin","param":{"uin":uin}},
             "saved":{"module":"music.musicasset.PlaylistFavRead","method":"GetPlaylistFavInfo","param":{"uin":uin}}
         }),
     )?;
-    let likes = songs_in(&root["likes"]["data"], "list")?;
+    let total = root["likes"]["data"]["total"].clone();
+    let likes = playlist::pages(source, |offset| {
+        if offset == 0 {
+            Ok(root["likes"].take())
+        } else {
+            let mut page = account_request(session, json!({"likes":source.query(uin, offset)}))?;
+            Ok(page["likes"].take())
+        }
+    })?;
     let mut playlists = Vec::new();
     for (name, list_key, saved) in [("created", "v_playlist", false), ("saved", "v_list", true)] {
         if root[name]["code"].as_i64().unwrap_or(-1) != 0 {
@@ -592,63 +596,26 @@ fn library(session: &Value) -> Result<Value, String> {
             }
         }
     }
-    Ok(json!({"likes":likes,"total":root["likes"]["data"]["total"],"playlists":playlists}))
-}
-fn playlist(session: &Value, id: u64, dirid: u64) -> Result<Value, String> {
-    if id > 0 {
-        let root = account_request(
-            session,
-            json!({"diss":{"module":"music.srfDissInfo.aiDissInfo","method":"uniform_get_Dissinfo","param":{"disstid":id,"userinfo":1,"tag":1,"song_begin":0,"song_num":100}}}),
-        )?;
-        songs_in(&root["diss"]["data"], "songlist")
-    } else {
-        let root = account_request(
-            session,
-            json!({"diss":{"module":"music.musicasset.PlaylistDetailRead","method":"GetUniformSongDetailInfo","param":{"uin":field(session,"uin"),"dirid":dirid,"bPaged":true,"offset":0,"size":100}}}),
-        )?;
-        songs_in(&root["diss"]["data"], "list")
-    }
+    Ok(json!({"likes":likes,"total":total,"playlists":playlists}))
 }
 fn home(session: &Value) -> Result<Value, String> {
-    let root = account_request(
-        session,
-        json!({"feed":{"module":"music.recommend.RecommendFeed","method":"get_recommend_feed","param":{"direction":0,"page":1,"s_num":6,"v_cache":[],"v_uniq":[]}}}),
-    )?;
-    if root["feed"]["code"].as_i64().unwrap_or(-1) != 0 {
-        return Err("推荐服务暂不可用，请刷新".into());
-    }
+    let feed = discovery::load_feed(1, |payload| account_request(session, payload))?;
     let mut cards = Vec::new();
-    let mut daily = 0;
-    if let Some(shelves) = root["feed"]["data"]["v_shelf"].as_array() {
-        for shelf in shelves {
-            if let Some(niches) = shelf["v_niche"].as_array() {
-                for niche in niches {
-                    if let Some(items) = niche["v_card"].as_array() {
-                        for card in items {
-                            let title = field(card, "title");
-                            if title.replace(' ', "").contains("每日30首") {
-                                daily = number(&card["id"])
-                                    .filter(|id| *id > 0)
-                                    .or_else(|| {
-                                        number(&card["miscellany"]["dirid"]).filter(|id| *id > 0)
-                                    })
-                                    .unwrap_or(202) as u64;
-                            }
-                            if !title.is_empty() {
-                                cards.push(discovery::recommendation_card(card));
-                            }
-                        }
-                    }
-                }
-            }
+    let mut daily = (0, 0);
+    for card in discovery::feed_cards(&feed).filter_map(discovery::recommendation_card) {
+        let title = field(&card, "title").replace(' ', "");
+        if title.contains("每日30首") || title.contains("每日三十首") {
+            daily = (card["id"].as_u64().unwrap_or(0), card["dirid"].as_u64().unwrap_or(0));
+        } else {
+            cards.push(card);
         }
     }
-    let songs = if daily > 0 {
-        playlist(session, daily, 0).unwrap_or(json!([]))
+    let songs = if daily != (0, 0) {
+        playlist(session, daily.0, daily.1).unwrap_or(json!([]))
     } else {
         json!([])
     };
-    Ok(json!({"daily":songs,"dailyId":daily,"cards":cards}))
+    Ok(json!({"daily":songs,"dailyId":daily.0,"dailyDirid":daily.1,"cards":cards}))
 }
 pub fn dispatch(command: &str, input: &str) -> String {
     let result = (|| -> Result<Value, String> {
@@ -658,7 +625,7 @@ pub fn dispatch(command: &str, input: &str) -> String {
             "profile" => profile(&v["session"]),
             "home" => home(&v["session"]),
             "recommend" => discovery::recommend(&v),
-            "add_song" => discovery::add_song(&v["session"],v["dirid"].as_u64().unwrap_or(0),v["id"].as_u64().unwrap_or(0)),
+            "add_song" => playlist::add_song(&v["session"],v["dirid"].as_u64().unwrap_or(0),v["tid"].as_u64().unwrap_or(0),&v["song"]),
             "guess" => discovery::guess(&v),
             "library" => library(&v["session"]),
             "playlist" => playlist(

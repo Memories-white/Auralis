@@ -183,6 +183,7 @@
     <string name="song_added">已添加到音乐服务</string>
     <string name="song_already_present">已确认歌曲在该歌单中</string>
     <string name="song_add_accepted">QQ 已受理请求，刷新歌单确认添加结果</string>
+    <string name="song_add_select_again">当前歌曲已变更或未就绪，请重新选择歌曲后再添加</string>
     <string name="song_information">歌曲信息</string>
     <string name="song_title">歌名</string>
     <string name="song_artist">歌手 / 作者</string>

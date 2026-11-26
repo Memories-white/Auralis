@@ -13,11 +13,11 @@ const song = i => ({ mid: `fixture-${i}`, title: ['Into the Light', '慢慢听',
 const rows = Array.from({ length: 160 }, (_, i) => song(i));
 const playlists = [0, 1, 2].map(i => ({ id: i + 1, dirid: i + 1, title: ['私人收藏', '晚风里的旋律', '周末散步'][i], count: 24 + i, saved: i === 2, cover: `https://example.invalid/list-${i}` }));
 const data = {
-  page: 'home', loggedIn: true, homeReady: true, nickname: 'Auralis Listener', uin: '000000', avatar: 'https://example.invalid/avatar',
+  page: 'home', loggedIn: true, homeReady: true, libraryReady: true, nickname: 'Auralis Listener', uin: '000000', avatar: 'https://example.invalid/avatar',
   dailyCover: rows[1].coverUrl, discovery: rows.slice(0, 18), tracks: rows, recent: rows.slice(0, 4), favorites: rows.slice(0, 2), likes: rows.slice(0, 24),
   search: [], playlists, recommendations: playlists, queue: rows.slice(0, 8), history: ['周末', '慢慢听'], artists: ['Auralis Studio', '音乐时光'],
   detailTitle: '晚风里的旋律', detailCover: playlists[1].cover, detailLoading: false, detailError: '', query: '', searchedQuery: '', busy: false, status: '',
-  discoveryLoading: false, discoveryMore: false, discoveryError: '', colorMode: 'light', monet: false, monetSource: 'wallpaper', monetStyle: 'TonalSpot', monetSpec: 'Spec2021', monetColor: '3482FF',
+  discoveryLoading: false, discoveryMore: true, discoveryError: '', colorMode: 'light', monet: false, monetSource: 'wallpaper', monetStyle: 'TonalSpot', monetSpec: 'Spec2021', monetColor: '3482FF',
   quality: 'auto', qualityFallback: true, version: '0.4.0-preview', qrOpen: false, lyrics: '[00:00.00]让旋律慢慢靠近\n[00:03.00]把今天交给音乐\n[00:06.00]下一句，落在心里\n[00:09.00]和你一起慢慢听\n[00:12.00]每一刻都有回响\n[00:15.00]走向更远的地方',
   translation: '', currentSong: rows[1], collectionBusy: false, collectionMessage: '', safeTop: 24, safeBottom: 16,
   colors: { bg: '#f6f6f6', card: '#ffffff', fg: '#191919', muted: '#797b80', primary: '#3482ff', 'on-primary': '#ffffff', border: '#e7e8eb' },
@@ -80,6 +80,7 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     assert.equal(await page.locator('#navigation button').count(), 3);
     assert.equal(await page.locator('[data-action=daily]').count(), 1);
     assert.equal(await page.locator('[data-action="song:discovery:6"]').count(), 1, 'Shelf songs repeat in discovery rows');
+    assert.equal(await page.locator('.feed-status [data-action=load_more]').count(), 1, 'Recommendation paging needs a manual control');
     assert.equal(await page.evaluate(() => document.activeElement.tagName), 'BODY');
     const bounds = await page.evaluate(() => ({ header: document.querySelector('#header').getBoundingClientRect().bottom, content: document.querySelector('#content').getBoundingClientRect().top, shelf: document.querySelector('.shelf-card').getBoundingClientRect().x }));
     assert.ok(bounds.content >= bounds.header - 1, 'Content overlaps header');
@@ -147,6 +148,7 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     assert.ok(await page.locator('[data-action=retry_playlist]').isVisible());
     data.detailError = ''; data.tracks = rows; data.counts.tracks = rows.length; await content();
     await page.locator('#content').evaluate(e => { e.scrollTop = e.scrollHeight; });
+    await page.locator('#song-tracks-100').waitFor({ state: 'attached' });
     await page.locator('[data-action=top]').waitFor({ state: 'visible' });
     assert.ok(await page.locator('[data-action=top]').isVisible());
     assert.ok(await page.locator('[data-action=locate]').isVisible());
@@ -165,6 +167,23 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     await page.locator('[data-action=sheet_back]').click();
     assert.ok(await page.locator('.sheet [data-action=add-playlist]').isVisible());
     await page.screenshot({ path: path.join(output, 'song-actions-dark.png') });
+    const actionsSheet = await page.locator('.sheet').elementHandle();
+    await page.locator('.sheet [data-action=add-playlist]').click();
+    const playlistSheet = await page.locator('.sheet').elementHandle();
+    assert.ok(await actionsSheet.evaluate(e => e.isConnected), 'The playlist chooser must reuse the song actions sheet');
+    assert.equal(await page.locator('.sheet [data-action="add:3"]').count(), 0, 'Saved playlists are read-only');
+    const addToPlaylist = page.locator('.sheet [data-action="add:1"]');
+    await addToPlaylist.click();
+    assert.deepEqual(await page.evaluate(() => window.__actions.filter(action => action.type === 'add_cloud')),
+      [{ type: 'add_cloud', mid: live.mid, dirid: 1 }]);
+    data.collectionMessage = '正在添加';
+    data.collectionBusy = true;
+    await content();
+    assert.ok(await playlistSheet.evaluate(e => e.isConnected), 'Native updates must keep the playlist chooser mounted');
+    assert.equal(await page.locator('.sheet .collection-message').textContent(), '正在添加');
+    assert.ok(await addToPlaylist.isDisabled(), 'The chooser must prevent repeat submissions while saving');
+    Object.assign(data, {collectionBusy: false, collectionMessage: ''});
+    await content();
     await page.locator('.sheet [data-action=close_sheet]').click(); await page.locator('[data-action=close_player]').click();
     await page.waitForTimeout(750);
     await page.setViewportSize({ width: 900, height: 650 });

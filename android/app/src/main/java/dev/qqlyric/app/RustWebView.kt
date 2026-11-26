@@ -153,6 +153,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
             val state=JSONObject().apply{
                 put("page",m.page);put("loggedIn",m.loggedIn);put("nickname",m.profile.optString("nickname"));put("avatar",m.avatar);put("uin",m.uin)
                 put("homeReady",m.home.length()>0);put("dailyCover",m.home.optJSONArray("daily")?.optJSONObject(0)?.artwork().orEmpty())
+                put("libraryReady",m.library.length()>0)
                 put("detailTitle",m.detailTitle);put("detailCover",m.detailCover);put("detailLoading",m.detailLoading);put("detailError",m.detailError)
                 put("query",m.searchText);put("searchedQuery",m.searchedQuery);put("busy",m.busy);put("status",m.status)
                 put("discoveryLoading",m.discoveryLoading);put("discoveryError",m.discoveryError);put("discoveryMore",m.discoveryMore)
@@ -210,7 +211,11 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
             "prepare_actions"->{m.collectionMessage="";if(m.loggedIn&&m.library.length()==0)m.refreshLibrary()}
             "shuffle_tracks"->if(m.tracks.isNotEmpty()){m.choosePlaybackMode("SHUFFLE");m.play(m.tracks,m.tracks.indices.random())}
             "sleep"->{val minutes=event.optInt("minutes");if(minutes in setOf(-1,0,15,30,60,90))m.setSleepTimer(minutes)}
-            "add_cloud"->{val mid=event.optString("mid");if(mid==m.mid)m.currentSong()?.let{m.addCloudSong(it,event.optLong("dirid"))}}
+            "add_cloud"->{
+                val song=m.currentSong()?.takeIf{event.optString("mid")==m.mid}
+                if(song!=null)m.addCloudSong(song,event.optLong("dirid"))
+                else m.collectionMessage=activity.getString(R.string.song_add_select_again)
+            }
         }
         publish()
     }
