@@ -6,7 +6,7 @@
 
 | 项目 | 用途 | 许可 / 说明 |
 | :-- | :-- | :-- |
-| [Melodist](https://github.com/Viemean/melodist) | 账号登录、接口调用研究与首页层次参考 | MIT；保留 [许可原文](licenses/Melodist-LICENSE) 及作者署名 |
+| [Melodist](https://github.com/Viemean/melodist) | 登录 / 接口、首页层次、封面候选与压缩缓存参考 | MIT；保留 [许可原文](licenses/Melodist-LICENSE) 及作者署名 |
 | [Melox](https://github.com/Inefy-03/Melox) | 布局研究与歌词运动适配 | 根许可 GPL-3.0；歌词两个文件单独标注 Apache-2.0，适配范围见下文；未复制截图、品牌图标或素材。参考 commit `97cae45b6acf8a0d1a0a89282d1f7ca02d198ad7` |
 | [MIUIX 0.9.5-beta01](https://github.com/compose-miuix-ui/miuix/tree/v0.9.5-beta01) | 原生主题、莫奈取色及视觉规范研究 | Apache-2.0；[许可原文](licenses/MIUIX-LICENSE)；0.4 页面与图标由 Rust UI 独立实现 |
 | [LyriconProvider](https://github.com/limczhh/LyriconProvider) | 系统歌词适配协议与消费链路 | 独立项目，本仓库不包含其模块源码或 APK；以其仓库及适配版本说明为准 |

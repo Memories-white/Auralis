@@ -25,7 +25,7 @@ fn button(action: &str, key: &str, primary: bool) -> String {
 fn art(url: &str, avatar: bool, class: &str) -> String {
     let placeholder = icon(if avatar { "account" } else { "music" });
     let image = if url.starts_with("https://") || url.starts_with("http://") {
-        format!("<img src=\"https://auralis.local/artwork?avatar={}&amp;url={}\" alt=\"\" loading=\"lazy\" decoding=\"async\" />",avatar,esc(js_sys::encode_uri_component(url).as_string().as_deref().unwrap_or("")))
+        format!("<img src=\"https://auralis.local/artwork?avatar={}&amp;player={}&amp;url={}\" alt=\"\" loading=\"lazy\" decoding=\"async\" />",avatar,class.contains("player-cover"),esc(js_sys::encode_uri_component(url).as_string().as_deref().unwrap_or("")))
     } else {
         String::new()
     };
@@ -265,8 +265,8 @@ pub fn player(
         _ => "order",
     };
     format!("<div class=player-wash>{}</div><div class=player-safe><div class=player-toolbar>{}<span>{}</span>{}</div><div class=player-identity>{}<div><h2>{}</h2><p>{}</p></div></div><div id=player-pages class=player-pages><div class=player-strip><div class=information-pane>{information}</div><div class=cover-pane><button id=cover-art class=cover-art data-action=song-actions aria-label=\"{}\">{}</button></div><div id=lyric-viewport class=lyric-viewport><div id=lyric-lines class=lyric-lines>{lyric_lines}</div></div></div></div><div class=page-dots>{}</div><div class=player-footer><div class=cover-seek>{}{}</div><div class=playback-error role=status>{}</div>{}<div class=player-tools>{}{}{}{}{}</div><div class=lyric-progress>{}</div></div></div>",
-        art(s(live,"cover"),false,""),action("close_player",&label("collapse_player"),"down",""),label("now_playing"),action("song-actions",&label("song_actions"),"more",""),
-        art(s(live,"cover"),false,"identity-art"),escaped_or(s(live,"title"),"not_playing"),esc(s(live,"artist")),label("song_actions"),art(s(live,"cover"),false,""),
+        art(s(live,"cover"),false,"player-cover"),action("close_player",&label("collapse_player"),"down",""),label("now_playing"),action("song-actions",&label("song_actions"),"more",""),
+        art(s(live,"cover"),false,"identity-art"),escaped_or(s(live,"title"),"not_playing"),esc(s(live,"artist")),label("song_actions"),art(s(live,"cover"),false,"player-cover"),
         ["player_info","player_cover","player_lyrics"].iter().enumerate().map(|(i,a)|format!("<button id=page-dot-{i} data-action={a} aria-label=\"{}\"></button>",label(["song_information","cover_page","lyrics_page"][i]))).collect::<String>(),
         seek(),times(),esc(s(live,"playbackStatus")),transport(live,false),
         action("mode",&label("playback_mode"),mode,if mode=="order"{""}else{"active"}),format!("<button class=quality-badge data-action=quality>{}</button>",esc(quality_badge(live))),

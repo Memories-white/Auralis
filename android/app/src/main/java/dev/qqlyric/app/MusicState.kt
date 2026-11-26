@@ -327,7 +327,7 @@ class MusicState(private val context:Context,private val protocol:(String,String
     fun cyclePlaybackMode(){val modes=PlaybackOrder.Mode.values().toList();choosePlaybackMode(modes[(modes.indexOfFirst{it.name==playbackMode}+1)%modes.size].name)}
     fun recommendations()=home.optJSONArray("cards")?.objects().orEmpty().filterNot{
         val name=it.optString("title").replace(Regex("\\s+"),"")
-        (home.optLong("dailyId")>0&&it.optLong("id")==home.optLong("dailyId"))||name.contains("每日30首")||name.contains("每日三十首")
+        it.optString("kind")=="guess"||name.contains("猜你喜欢")&&name.contains("沉浸刷歌")||(home.optLong("dailyId")>0&&it.optLong("id")==home.optLong("dailyId"))||name.contains("每日30首")||name.contains("每日三十首")
     }
     fun favorite():Boolean=if(pendingToken!=null)false else currentSong()?.let{song->favorites.any{it.optString("mid")==song.optString("mid")}}?:false
     fun toggleFavorite(){

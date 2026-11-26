@@ -115,7 +115,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
                 "/artwork"->{
                     val url=uri.getQueryParameter("url").orEmpty()
                     val avatar=uri.getQueryParameter("avatar")=="true"
-                    val bitmap=ArtworkCache.load(activity,url,avatar)?:return empty()
+                    val bitmap=ArtworkCache.load(activity,url,avatar,uri.getQueryParameter("player")=="true")?:return empty()
                     val stream=ByteArrayOutputStream()
                     @Suppress("DEPRECATION") val format=if(Build.VERSION.SDK_INT>=30)Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
                     bitmap.compress(format,76,stream)

@@ -16,6 +16,7 @@ struct App {
     data: Value,
     live: Value,
     filter: String,
+    painted_route: String,
     sheet: String,
     sheet_stack: Vec<String>,
     player: bool,
@@ -598,6 +599,9 @@ impl App {
         }
     }
     fn paint_content(&mut self) {
+        let route = self.route_key();
+        let route_changed = route != self.painted_route;
+        self.painted_route = route;
         let mut input = self.data.clone();
         input["filter"] = json!(self.filter);
         input["visibleLimit"] = json!(*self.limits.get(&self.route_key()).unwrap_or(&100));
@@ -608,6 +612,13 @@ impl App {
                 &render::content(&presentation, &input, &self.live),
             );
             set_html("navigation", &render::navigation(&presentation));
+            if route_changed {
+                if let Some(main) = el("content") {
+                    class(&main, "route-enter", false);
+                    let _ = main.get_bounding_client_rect();
+                    class(&main, "route-enter", true);
+                }
+            }
             if let Some(dock) = el("dock") {
                 class(&dock, "no-nav", !b(&presentation, "root"));
                 class(
@@ -623,7 +634,14 @@ impl App {
             }
         }
         if let Some(root) = el("app") {
-            style(&root,"--lyric-blur-unit",&format!("{}px",3.0/web_sys::window().unwrap().device_pixel_ratio().max(1.0)));
+            style(
+                &root,
+                "--lyric-blur-unit",
+                &format!(
+                    "{}px",
+                    3.0 / web_sys::window().unwrap().device_pixel_ratio().max(1.0)
+                ),
+            );
             for key in [
                 "bg",
                 "card",

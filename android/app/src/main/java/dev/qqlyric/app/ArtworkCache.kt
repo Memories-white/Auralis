@@ -19,7 +19,7 @@ object ArtworkCache {
     private fun address(url:String,avatar:Boolean):String {
         val secure=url.replace("http://","https://")
         return if(avatar)secure.replace(Regex("([?&]s=)640")){it.groupValues[1]+"160"}
-        else secure.replace(Regex("/T002R\\d+x\\d+M000"),"/T002R500x500M000")
+        else secure
     }
     private fun key(url:String)=MessageDigest.getInstance("SHA-256").digest(url.toByteArray()).joinToString(""){"%02x".format(it)}
     private fun age(avatar:Boolean)=if(avatar)24L*60*60*1000 else 7L*24*60*60*1000
@@ -27,7 +27,16 @@ object ArtworkCache {
         val entry=memory.get(key(address(url,avatar))) ?: return null
         return entry.bitmap.takeIf{System.currentTimeMillis()-entry.written<age(avatar)}
     }
-    fun load(context:Context,url:String,avatar:Boolean=false):Bitmap? {
+    fun load(context:Context,url:String,avatar:Boolean=false,player:Boolean=false):Bitmap? {
+        if(avatar)return loadCandidate(context,url,true,false)
+        val metered=runCatching{(context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).isActiveNetworkMetered}.getOrDefault(true)
+        val candidates=runCatching{
+            org.json.JSONObject(RustCore.call("artwork_candidates",org.json.JSONObject().put("url",url).put("player",player).put("metered",metered).toString())).getJSONArray("data").let{a->List(a.length()){a.getString(it)}}
+        }.getOrDefault(listOf(url))
+        for(candidate in candidates){loadCandidate(context,candidate,false,player)?.let{return it}}
+        return null
+    }
+    private fun loadCandidate(context:Context,url:String,avatar:Boolean,player:Boolean):Bitmap? {
         val address=address(url,avatar)
         if(!address.startsWith("https://"))return null
         val key=key(address)
@@ -49,7 +58,7 @@ object ArtworkCache {
                     val bounds=BitmapFactory.Options().apply{inJustDecodeBounds=true}
                     BitmapFactory.decodeByteArray(bytes,0,bytes.size,bounds)
                     require(bounds.outWidth in 1..8192 && bounds.outHeight in 1..8192)
-                    val edge=if(avatar)160 else 512
+                    val edge=if(avatar)160 else if(player)800 else 500
                     var sample=1
                     while(maxOf(bounds.outWidth,bounds.outHeight)/sample>edge*2)sample*=2
                     val decoded=BitmapFactory.decodeByteArray(bytes,0,bytes.size,BitmapFactory.Options().apply{inSampleSize=sample}) ?: return@runCatching null
@@ -62,7 +71,10 @@ object ArtworkCache {
             if(bitmap!=null){
                 val output=ByteArrayOutputStream()
                 @Suppress("DEPRECATION") val format=if(Build.VERSION.SDK_INT>=30)Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
-                if(bitmap.compress(format,76,output))store.write(key,output.toByteArray(),now)
+                for(quality in listOf(76,65,55)){
+                    output.reset()
+                    if(bitmap.compress(format,quality,output)&&output.size()<=256*1024){store.write(key,output.toByteArray(),now);break}
+                }
                 memory.put(key,Entry(bitmap,now));return bitmap
             }
             // Temporary network failures can still display a previously cached image.

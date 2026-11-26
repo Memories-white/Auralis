@@ -13,6 +13,7 @@ use std::{
 
 const GATEWAY: &str = "https://u.y.qq.com/cgi-bin/musicu.fcg";
 mod discovery;
+mod artwork;
 const AGENT: &str = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36";
 
 #[cfg(any(target_os = "android", test))]
@@ -622,6 +623,7 @@ pub fn dispatch(command: &str, input: &str) -> String {
     let result = (|| -> Result<Value, String> {
         let v: Value = serde_json::from_str(input).map_err(|e| format!("请求 JSON 错误: {e}"))?;
         match command {
+            "artwork_candidates"=>Ok(artwork::candidates(&v)),
             "profile" => profile(&v["session"]),
             "home" => home(&v["session"]),
             "recommend" => discovery::recommend(&v),
