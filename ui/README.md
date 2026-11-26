@@ -41,4 +41,4 @@ cargo test --manifest-path ui/Cargo.toml --locked
 
 ## 视觉参考
 
-参考 [Melox](https://github.com/Inefy-03/Melox) 的大标题、分组卡片、封面货架、独立歌曲栏与导航结构，检查基线为 `97cae45b6acf8a0d1a0a89282d1f7ca02d198ad7`。Melox 使用 Kotlin / Miuix，本项目按 Rust UI 要求独立实现，没有复制其源码、品牌图标、截图或素材。原有协议与播放链路继续使用原实现。
+参考 [Melox](https://github.com/Inefy-03/Melox) 的大标题、分组卡片、封面货架、独立歌曲栏与导航结构，检查基线为 `97cae45b6acf8a0d1a0a89282d1f7ca02d198ad7`。页面布局独立实现。0.4.1 将单独标注 Apache-2.0 的歌词行运动与焦点 / 模糊规则对应移植为 Rust，来源与修改说明见 `docs/licenses/Melox-lyrics-NOTICE.md`。没有复制品牌图标、截图或素材，原有协议与播放链路继续使用原实现。

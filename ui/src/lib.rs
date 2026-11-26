@@ -2,6 +2,7 @@
 //! run in Rust/WASM. JavaScript is generated bindings plus a small host bootstrap.
 mod icons;
 mod labels;
+mod lyric_motion;
 mod presentation;
 mod render;
 
@@ -28,6 +29,7 @@ struct App {
     browse_until: f64,
     lyric_scroll: f64,
     lyric_velocity: f64,
+    row_motion: HashMap<usize, lyric_motion::RowMotion>,
     last_frame: f64,
     mini_until: f64,
     last_load: f64,
@@ -621,6 +623,7 @@ impl App {
             }
         }
         if let Some(root) = el("app") {
+            style(&root,"--lyric-blur-unit",&format!("{}px",3.0/web_sys::window().unwrap().device_pixel_ratio().max(1.0)));
             for key in [
                 "bg",
                 "card",
@@ -668,6 +671,7 @@ impl App {
             self.lyric_mid = identity;
             self.active_line = None;
             self.lyric_velocity = 0.0;
+            self.row_motion.clear();
             self.lyric_scroll = 0.0;
         }
         set_html(
@@ -918,19 +922,68 @@ impl App {
                     let target = (line.offset_top() as f64
                         - viewport.client_height() as f64 * 0.36)
                         .max(0.0);
-                    self.lyric_scroll = viewport.scroll_top() as f64;
-                    if self.reduced {
-                        self.lyric_scroll = target;
-                        self.lyric_velocity = 0.0;
-                        viewport.set_scroll_top(target as i32);
-                    } else {
-                        let acceleration =
-                            (target - self.lyric_scroll) * 105.0 - self.lyric_velocity * 17.2;
-                        self.lyric_velocity += acceleration * dt;
-                        self.lyric_scroll += self.lyric_velocity * dt;
+                    let old = viewport.scroll_top() as f64;
+                    let destination = target.round();
+                    let travel = destination - old;
+                    if travel.abs() > 1.0 {
+                        let visible: Vec<usize> = (0..self.lines.len())
+                            .filter(|i| {
+                                el(&format!("lyric-{i}"))
+                                    .and_then(|e| e.dyn_into::<HtmlElement>().ok())
+                                    .map(|e| {
+                                        e.offset_top() as f64 + e.offset_height() as f64 > old
+                                            && (e.offset_top() as f64)
+                                                < old + viewport.client_height() as f64
+                                    })
+                                    .unwrap_or(false)
+                            })
+                            .collect();
+                        viewport.set_scroll_top(destination as i32);
+                        for i in 0..self.lines.len() {
+                            let rank =
+                                visible
+                                    .iter()
+                                    .position(|v| *v == i)
+                                    .unwrap_or(if i < index {
+                                        0
+                                    } else {
+                                        visible.len().saturating_sub(1)
+                                    });
+                            self.row_motion
+                                .entry(i)
+                                .or_default()
+                                .place(travel, lyric_motion::delay(rank, visible.len()));
+                        }
                     }
-                    if (target - self.lyric_scroll).abs() > 0.5 || self.lyric_velocity.abs() > 0.5 {
-                        viewport.set_scroll_top(self.lyric_scroll as i32);
+                    let gap = self
+                        .lines
+                        .get(index + 1)
+                        .map(|l| l.0 - self.lines[index].0)
+                        .unwrap_or(1000);
+                    for (i, row) in &mut self.row_motion {
+                        let offset = if self.reduced {
+                            *row = Default::default();
+                            0.0
+                        } else {
+                            row.sample(dt, lyric_motion::stiffness(gap))
+                        };
+                        if let Some(element) = el(&format!("lyric-{i}")) {
+                            style(&element, "translate", &format!("0 {offset}px"));
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(viewport) = el("lyric-viewport") {
+            let browsing = time <= self.browse_until;
+            class(&viewport, "browsing", browsing);
+            if browsing {
+                self.row_motion.clear();
+                if let Ok(rows) = viewport.query_selector_all(".lyric-line") {
+                    for i in 0..rows.length() {
+                        if let Some(row) = rows.item(i).and_then(|e| e.dyn_into::<Element>().ok()) {
+                            style(&row, "translate", "0 0");
+                        }
                     }
                 }
             }
