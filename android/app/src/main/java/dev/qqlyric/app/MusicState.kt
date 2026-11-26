@@ -2,7 +2,6 @@ package dev.qqlyric.app
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Handler
 import android.os.Looper
@@ -93,7 +92,8 @@ class MusicState(private val context:Context,private val protocol:(String,String
     var profile by mutableStateOf(session.optJSONObject("profile")?:JSONObject())
     var colorMode by mutableStateOf(prefs.getString("color_mode","system")?:"system")
     var qrOpen by mutableStateOf(false)
-    var qrBitmap by mutableStateOf<Bitmap?>(null)
+    var qrImage by mutableStateOf("")
+        private set
     var qrStatus by mutableStateOf("")
     var title by mutableStateOf(PlayerService.currentTitle.ifBlank{savedPlayback?.song?.optString("title").orEmpty()})
     var artist by mutableStateOf(PlayerService.currentArtist.ifBlank{savedPlayback?.song?.optString("artist").orEmpty()})
@@ -339,12 +339,27 @@ class MusicState(private val context:Context,private val protocol:(String,String
     fun setAppearance(mode:String){colorMode=mode;prefs.edit().putString("color_mode",mode).apply()}
     private fun refreshProfile(){call("profile",JSONObject().put("session",session)){result->if(result.optBoolean("ok")){profile=result.getJSONObject("data");session.put("profile",profile);secure.save(session.toString())}}}
     fun login(){
-        val generation=++loginGeneration;qrOpen=true;qrBitmap=null;qrStatus=context.getString(R.string.getting_qr)
+        val generation=++loginGeneration
+        qrOpen=true
+        qrImage=""
+        qrStatus=context.getString(R.string.getting_qr)
         call("qr_start"){result->
             if(generation!=loginGeneration||!qrOpen)return@call
             if(failed(result)){qrStatus=status;return@call}
-            val data=result.getJSONObject("data");val bytes=Base64.decode(data.getString("image"),Base64.DEFAULT)
-            qrBitmap=BitmapFactory.decodeByteArray(bytes,0,bytes.size);qrStatus=context.getString(R.string.scan_qq);poll(generation,data.getString("qrsig"))
+            val data=result.optJSONObject("data")
+            val image=data?.optString("image").orEmpty()
+            val signature=data?.optString("qrsig").orEmpty()
+            val validImage=runCatching {
+                val bytes=Base64.decode(image,Base64.DEFAULT)
+                BitmapFactory.decodeByteArray(bytes,0,bytes.size)!=null
+            }.getOrDefault(false)
+            if(signature.isBlank()||!validImage){
+                qrStatus=context.getString(R.string.qr_image_invalid)
+                return@call
+            }
+            qrImage=image
+            qrStatus=context.getString(R.string.scan_qq)
+            poll(generation,signature)
         }
     }
     private fun poll(generation:Int,sig:String,networkRetries:Int=0){
@@ -363,12 +378,16 @@ class MusicState(private val context:Context,private val protocol:(String,String
             val data=result.getJSONObject("data")
             when(data.optString("status")){
                 "success"->{session=data.getJSONObject("session");secure.save(session.toString());loggedIn=true;dismissLogin();navigate("mine");refreshLibrary();refreshProfile();refreshHome()}
+                "failed"->{
+                    qrStatus=data.optString("error",context.getString(R.string.request_retry))
+                    status=displayError(qrStatus)
+                }
                 "expired","canceled"->qrStatus=context.getString(R.string.qr_expired)
                 else->{qrStatus=if(data.optString("status")=="confirming")context.getString(R.string.confirm_qq)else context.getString(R.string.waiting_scan);ui.postDelayed({poll(generation,sig)},1800)}
             }
         }
     }
-    fun dismissLogin(){loginGeneration++;qrOpen=false}
+    fun dismissLogin(){loginGeneration++;qrOpen=false;qrImage=""}
     fun logout(){cancelDetail();homeGeneration++;feedGeneration++;discoverySongs=emptyList();discoveryLoading=false;discoveryMore=true;discoveryError="";collectionBusy=false;collectionMessage="";epoch++;loginGeneration++;playGeneration++;pendingMid=null;pendingToken=null;backStack.clear();secure.clear();session=JSONObject();profile=JSONObject();loggedIn=false;home=JSONObject();library=JSONObject();page="home";status=context.getString(R.string.logged_out);playbackStatus="";command("STOP")}
     fun close(){prefs.unregisterOnSharedPreferenceChangeListener(historyListener);playbackPrefs.unregisterOnSharedPreferenceChangeListener(playbackListener);alive=false;loginGeneration++;worker.shutdownNow();feedWorker.shutdownNow();detailWorker.shutdownNow();ui.removeCallbacksAndMessages(null)}
 }

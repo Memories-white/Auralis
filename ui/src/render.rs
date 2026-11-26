@@ -321,7 +321,22 @@ pub fn overlay(sheet: &str, data: &Value, live: &Value, can_back: bool) -> Strin
     });
     let close = if qr { "dismiss_login" } else { "close_sheet" };
     let content = if qr {
-        format!("<div class=qr-content><img src=\"https://auralis.local/qr?v={}\" alt=\"{}\"/><p role=status>{}</p>{}{}</div>",n(data,"qrRevision"),label("login_qr"),esc(s(data,"qrStatus")),button("login","get_qr_again",true),button("dismiss_login","cancel",false))
+        let qr_image = s(data, "qrImage");
+        let image = if qr_image.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<img src=\"data:image/png;base64,{}\" alt=\"{}\"/>",
+                esc(qr_image),
+                label("login_qr")
+            )
+        };
+        format!(
+            "<div class=qr-content>{image}<p role=status>{}</p>{}{}</div>",
+            esc(s(data, "qrStatus")),
+            button("login", "get_qr_again", true),
+            button("dismiss_login", "cancel", false)
+        )
     } else {
         match sheet {
             "queue" => source(data, "queue")
