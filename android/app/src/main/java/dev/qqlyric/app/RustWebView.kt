@@ -25,7 +25,7 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 
 // Native bridge allowlist only; page composition and destinations live in Rust.
-private val SETTINGS_ROUTES=setOf("settings","appearance","monet","monet-source","monet-style","monet-spec","quality","storage","about","ui-customize","lyrics-style")
+private val SETTINGS_ROUTES=setOf("settings","appearance","monet","monet-source","monet-style","monet-spec","quality","storage","about","ui-customize","ui-dock","ui-player","ui-list","ui-motion","lyrics-style","lyric-type","lyric-effect")
 
 /** Only window/theme/system bridges live here. All visible application pages and
  * event/motion logic are compiled from the Rust ui crate into the bundled WASM module. */

@@ -63,8 +63,20 @@ fn empty(key: &str, title: &str, summary: &str, action: &str, action_label: &str
         action,
     )
 }
-fn preference(label: &str, summary: Value, action: &str) -> Value {
-    json!({"kind":"preference","text":tr(label),"summary":summary,"action":action})
+/// A settings row with a leading glyph and a trailing current value, following the
+/// Melox grouped-list layout: icon, title/summary, value, chevron.
+fn pref_full(label: &str, summary: Value, action: &str, glyph: &str, value: Value) -> Value {
+    json!({"kind":"preference","text":tr(label),"summary":summary,"action":action,"glyph":glyph,"value":value})
+}
+/// A row that opens a sub-page; `title` and `summary` are plain UI copy.
+fn nav_row(title: &str, summary: &str, action: &str, glyph: &str, value: Value) -> Value {
+    json!({"kind":"preference","text":value_json(title),"summary":value_json(summary),"action":action,"glyph":glyph,"value":value})
+}
+fn value_json(text: &str) -> Value {
+    json!({"value":text})
+}
+fn note(text: &str) -> Value {
+    json!({"kind":"text","style":"settings-note","text":value_json(text)})
 }
 fn tile(label: &str, summary: Value, glyph: &str, action: &str) -> Value {
     let mut node = card(
@@ -383,55 +395,139 @@ fn radio(label: Value, summary: Value, selected: bool, enabled: bool, action: &s
     json!({"kind":"radio","text":label,"summary":summary,"selected":selected,"enabled":enabled,"action":action})
 }
 fn monet_switch(v: &Value) -> Value {
-    json!({"kind":"switch","text":tr("monet_title"),"summary":tr("monet_summary"),"checked":yes(v,"monet"),"action":"toggle_monet"})
+    json!({"kind":"switch","text":tr("monet_title"),"summary":tr("monet_summary"),"glyph":"palette","checked":yes(v,"monet"),"action":"toggle_monet"})
 }
 fn dependent(mut node: Value, enabled: bool) -> Value {
     node["enabled"] = json!(enabled);
     node
 }
 
-fn customization_page(page: &str, v: &Value) -> Vec<Value> {
-    let groups: &[(&str, &str, &[&str])] = if page == "lyrics-style" {
-        &[
-            (
-                "lyric-type",
-                "排版",
-                &["lyricAlign", "lyricSize", "lyricWeight"],
-            ),
-            (
-                "lyric-effects",
-                "显示与动效",
-                &["lyricBlur", "translation", "lyricScale", "lyricControls"],
-            ),
-        ]
-    } else {
-        &[
-            (
-                "dock",
-                "底栏与材质",
-                &["bar", "compact", "blur", "navLabels"],
-            ),
-            (
-                "cover",
-                "播放界面",
-                &["background", "shape", "titleAlign", "coverFlip"],
-            ),
-            ("list", "歌曲列表", &["artwork", "duration"]),
-            ("motion", "导航动效", &["motion"]),
-        ]
-    };
-    let mut nodes = vec![];
-    for (key, title, keys) in groups {
-        nodes.push(json!({"kind":"section","text":{"value":title}}));
-        nodes.push(group(key, crate::customization::nodes(v, keys)));
+fn option_card(page: &str, key: &str, v: &Value) -> Vec<Value> {
+    let title = crate::customization::spec(key).map(|s| s.title).unwrap_or(key);
+    vec![
+        json!({"kind":"section","text":value_json(title)}),
+        group(&format!("{page}-{key}"), crate::customization::radios(v, key)),
+    ]
+}
+fn options_page(page: &str, keys: &[&str], v: &Value) -> Vec<Value> {
+    let mut nodes = Vec::new();
+    for key in keys {
+        nodes.extend(option_card(page, key, v));
     }
-    nodes.push(json!({"kind":"text","style":"settings-note","text":{"value":"选项即时生效并自动保存。系统关闭动画时，优先遵循系统设置。"}}));
+    nodes.push(note("改动即时生效并自动保存。系统关闭动画时优先遵循系统设置。"));
     nodes
+}
+/// Hub page: one group of rows that opens a dedicated preference page, mirroring
+/// the Melox theme/lyrics/interface sub-page structure instead of one long list.
+fn customization_hub(
+    page: &str,
+    title: &str,
+    summary: &str,
+    rows: Vec<Value>,
+    v: &Value,
+) -> Vec<Value> {
+    let mut nodes = vec![
+        json!({"kind":"section","text":value_json(title)}),
+        group(&format!("{page}-rows"), rows),
+    ];
+    if let Some(current) = crate::customization::spec("bar") {
+        // The hub keeps a compact preview of the two most visible choices.
+        nodes.push(json!({"kind":"text","style":"settings-note","text":value_json(&format!(
+            "底栏：{} · 封面：{}",
+            crate::customization::title(v, "bar"),
+            crate::customization::title(v, "shape")
+        ))}));
+        let _ = current;
+    }
+    nodes.push(note(summary));
+    nodes
+}
+fn customization_page(page: &str, v: &Value) -> Vec<Value> {
+    match page {
+        "lyrics-style" => customization_hub(
+            page,
+            "歌词外观",
+            "歌词排版与显示效果，只影响已有歌词数据，不请求新的翻译或逐词时间。",
+            vec![
+                nav_row(
+                    "歌词排版",
+                    "对齐、字号、字重",
+                    "navigate:lyric-type",
+                    "text",
+                    Value::Null,
+                ),
+                nav_row(
+                    "歌词效果",
+                    "渐变模糊、翻译、当前句放大、播放控件",
+                    "navigate:lyric-effect",
+                    "motion",
+                    Value::Null,
+                ),
+            ],
+            v,
+        ),
+        "ui-customize" => customization_hub(
+            page,
+            "界面外观",
+            "所有选项随 Rust 状态即时生效并自动保存，不会清除账号、歌曲或播放进度。",
+            vec![
+                nav_row(
+                    "底栏与材质",
+                    "底栏样式、紧凑歌曲栏、模糊与文字",
+                    "navigate:ui-dock",
+                    "dock",
+                    Value::Null,
+                ),
+                nav_row(
+                    "播放界面",
+                    "背景、封面形状、标题对齐、切歌动效",
+                    "navigate:ui-player",
+                    "cover",
+                    Value::Null,
+                ),
+                nav_row(
+                    "歌曲列表",
+                    "列表封面与时长",
+                    "navigate:ui-list",
+                    "list",
+                    Value::Null,
+                ),
+                nav_row(
+                    "页面动效",
+                    "舒缓弹性或减少动态效果",
+                    "navigate:ui-motion",
+                    "motion",
+                    Value::Null,
+                ),
+            ],
+            v,
+        ),
+        "ui-dock" => options_page(page, &["bar", "compact", "blur", "navLabels"], v),
+        "ui-player" => options_page(page, &["background", "shape", "titleAlign", "coverFlip"], v),
+        "ui-list" => options_page(page, &["artwork", "duration"], v),
+        "ui-motion" => options_page(page, &["motion"], v),
+        "lyric-type" => options_page(page, &["lyricAlign", "lyricSize", "lyricWeight"], v),
+        "lyric-effect" => options_page(
+            page,
+            &["lyricBlur", "translation", "lyricScale", "lyricControls"],
+            v,
+        ),
+        _ => options_page(page, &[], v),
+    }
+}
+fn quality_title(v: &Value) -> Value {
+    tr(match string(v, "quality") {
+        "sq" => "quality_sq",
+        "hq" => "quality_hq",
+        "standard" => "quality_standard",
+        _ => "quality_auto",
+    })
 }
 fn settings(page: &str, v: &Value) -> Vec<Value> {
     let monet = yes(v, "monet");
     match page {
-        "ui-customize" | "lyrics-style" => customization_page(page, v),
+        "ui-customize" | "lyrics-style" | "ui-dock" | "ui-player" | "ui-list" | "ui-motion"
+        | "lyric-type" | "lyric-effect" => customization_page(page, v),
         "settings" => {
             let mut nodes = vec![
                 card(
@@ -449,27 +545,35 @@ fn settings(page: &str, v: &Value) -> Vec<Value> {
                 group(
                     "appearance",
                     vec![
-                        preference(
+                        pref_full(
                             "appearance",
-                            tr(appearance(string(v, "colorMode"))),
+                            tr("appearance_summary"),
                             "navigate:appearance",
+                            "palette",
+                            tr(appearance(string(v, "colorMode"))),
                         ),
-                        preference(
-                            "ui_customize",
-                            tr("ui_customize_summary"),
+                        nav_row(
+                            "主题与界面",
+                            "底栏、播放页、列表与动效",
                             "navigate:ui-customize",
+                            "dock",
+                            Value::Null,
                         ),
-                        preference(
-                            "lyrics_style",
-                            tr("lyrics_style_summary"),
+                        nav_row(
+                            "歌词外观",
+                            "排版、模糊、翻译与播放控件",
                             "navigate:lyrics-style",
+                            "lyrics",
+                            Value::Null,
                         ),
                         monet_switch(v),
                         dependent(
-                            preference(
+                            pref_full(
                                 "monet_options",
-                                tr(source(string(v, "monetSource"))),
+                                tr("monet_summary"),
                                 "navigate:monet",
+                                "palette",
+                                tr(source(string(v, "monetSource"))),
                             ),
                             monet,
                         ),
@@ -479,25 +583,40 @@ fn settings(page: &str, v: &Value) -> Vec<Value> {
                 group(
                     "player",
                     vec![
-                        preference(
+                        pref_full(
                             "audio_quality",
-                            tr(match string(v, "quality") {
-                                "sq" => "quality_sq",
-                                "hq" => "quality_hq",
-                                "standard" => "quality_standard",
-                                _ => "quality_auto",
-                            }),
+                            tr("quality_summary"),
                             "navigate:quality",
+                            "volume",
+                            quality_title(v),
                         ),
-                        preference("sleep_timer", tr("sleep_off_summary"), "sleep"),
+                        pref_full(
+                            "sleep_timer",
+                            tr("sleep_off_summary"),
+                            "sleep",
+                            "timer",
+                            Value::Null,
+                        ),
                     ],
                 ),
                 section("app-title", "application_group", ""),
                 group(
                     "app",
                     vec![
-                        preference("image_cache", tr("cache_short"), "navigate:storage"),
-                        preference("about", value(string(v, "version")), "navigate:about"),
+                        pref_full(
+                            "image_cache",
+                            tr("cache_short"),
+                            "navigate:storage",
+                            "storage",
+                            Value::Null,
+                        ),
+                        pref_full(
+                            "about",
+                            tr("about"),
+                            "navigate:about",
+                            "info",
+                            value(string(v, "version")),
+                        ),
                     ],
                 ),
             ];
@@ -505,7 +624,13 @@ fn settings(page: &str, v: &Value) -> Vec<Value> {
                 nodes.push(section("account-title", "account_group", ""));
                 nodes.push(group(
                     "logout",
-                    vec![preference("logout", tr("logout_summary"), "logout")],
+                    vec![pref_full(
+                        "logout",
+                        tr("logout_summary"),
+                        "logout",
+                        "logout",
+                        Value::Null,
+                    )],
                 ));
             }
             nodes
@@ -519,7 +644,11 @@ fn settings(page: &str, v: &Value) -> Vec<Value> {
                     .map(|mode| {
                         radio(
                             tr(appearance(mode)),
-                            Value::Null,
+                            tr(match *mode {
+                                "light" => "light_mode_summary",
+                                "dark" => "dark_mode_summary",
+                                _ => "system_mode_summary",
+                            }),
                             string(v, "colorMode") == *mode,
                             true,
                             &format!("appearance:{mode}"),
@@ -543,30 +672,36 @@ fn settings(page: &str, v: &Value) -> Vec<Value> {
                     vec![
                         monet_switch(v),
                         dependent(
-                            preference(
+                            pref_full(
                                 "color_source",
-                                tr(source(string(v, "monetSource"))),
+                                tr("color_source_summary"),
                                 "navigate:monet-source",
+                                "palette",
+                                tr(source(string(v, "monetSource"))),
                             ),
                             monet,
                         ),
                         dependent(
-                            preference(
+                            pref_full(
                                 "palette_style",
-                                tr(palette(string(v, "monetStyle"))),
+                                tr("palette_style_summary"),
                                 "navigate:monet-style",
+                                "palette",
+                                tr(palette(string(v, "monetStyle"))),
                             ),
                             monet,
                         ),
                         dependent(
-                            preference(
+                            pref_full(
                                 "color_spec",
+                                tr("color_spec_summary"),
+                                "navigate:monet-spec",
+                                "info",
                                 value(if string(v, "monetSpec") == "Spec2025" {
                                     "2025"
                                 } else {
                                     "2021"
                                 }),
-                                "navigate:monet-spec",
                             ),
                             monet,
                         ),
@@ -678,7 +813,6 @@ fn settings(page: &str, v: &Value) -> Vec<Value> {
         )],
     }
 }
-
 pub fn screen(v: &Value) -> Result<Value, String> {
     let page = string(v, "page");
     let (title, nodes) = match page {
@@ -688,7 +822,8 @@ pub fn screen(v: &Value) -> Result<Value, String> {
         "songs" => (value(string(v, "detailTitle")), detail(v)),
         "recent" => (tr("recent_plays"), recent(v)),
         "settings" | "appearance" | "quality" | "monet" | "monet-source" | "monet-style"
-        | "monet-spec" | "storage" | "about" | "ui-customize" | "lyrics-style" => {
+        | "monet-spec" | "storage" | "about" | "ui-customize" | "lyrics-style" | "ui-dock"
+        | "ui-player" | "ui-list" | "ui-motion" | "lyric-type" | "lyric-effect" => {
             let title = match page {
                 "monet" => "monet_title",
                 "monet-source" => "color_source",
@@ -697,6 +832,12 @@ pub fn screen(v: &Value) -> Result<Value, String> {
                 "quality" => "audio_quality",
                 "ui-customize" => "ui_customize",
                 "lyrics-style" => "lyrics_style",
+                "ui-dock" => "dock_group",
+                "ui-player" => "player_group",
+                "ui-list" => "list_group",
+                "ui-motion" => "motion_group",
+                "lyric-type" => "lyric_type_group",
+                "lyric-effect" => "lyric_effect_group",
                 _ => page,
             };
             (tr(title), settings(page, v))
@@ -758,5 +899,28 @@ mod tests {
     #[test]
     fn unknown_route_is_not_silently_presented_as_settings() {
         assert!(screen(&json!({"page":"missing"})).is_err());
+    }
+    #[test]
+    fn interface_settings_are_split_into_navigable_sub_pages() {
+        let hub = screen(&json!({"page":"ui-customize"})).unwrap().to_string();
+        for action in [
+            "navigate:ui-dock",
+            "navigate:ui-player",
+            "navigate:ui-list",
+            "navigate:ui-motion",
+        ] {
+            assert!(hub.contains(action), "{action} missing from the interface hub");
+        }
+        let lyrics = screen(&json!({"page":"lyrics-style"})).unwrap().to_string();
+        assert!(lyrics.contains("navigate:lyric-type"));
+        assert!(lyrics.contains("navigate:lyric-effect"));
+        let dock = screen(&json!({"page":"ui-dock","uiPreferences":{"bar":"floating"}})).unwrap();
+        let text = dock.to_string();
+        assert_eq!(text.matches("\"action\":\"ui:bar:").count(), 3);
+        assert!(text.contains("ui:bar:floating"));
+        // One selected value per option group on this page.
+        assert_eq!(text.matches("\"selected\":true").count(), 4);
+        let player = screen(&json!({"page":"ui-player","uiPreferences":{"shape":"circle"}}));
+        assert!(player.unwrap().to_string().contains("ui:shape:circle"));
     }
 }

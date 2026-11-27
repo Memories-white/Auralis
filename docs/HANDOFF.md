@@ -6,16 +6,41 @@
 
 | 项目 | 状态 / 入口 |
 | :-- | :-- |
-| 日期、版本 | 2026-11-27 · `0.4.5-preview` · versionCode `26` |
-| 基线 | `3427332` · 0.4.4-preview，主题与底栏自定义 |
+| 日期、版本 | 2026-11-27 · `0.5.0-preview` · versionCode `27` |
+| 基线 | `e84bf3b` · 0.4.5-preview，封面复用与启动恢复 |
 | 当前提交 | 本文与本次实现同一个提交；使用 `git log -1` 获取完整 SHA，避免文档自引用哈希 |
-| 最新本地包 | `APKs/Auralis-v0.4.5-preview.apk` |
-| APK SHA256 | `745E047F2D0AA649B14BD513C7E53DC6DBDEC02CD8B16A64433A061FC4DABF66` |
+| 最新本地包 | `APKs/Auralis-v0.5.0-preview.apk` |
+| APK SHA256 | `7192F0542DADA846BE85C002D9999F8191FFB744C0B423FC24B2E7C6B39C571E` |
+| 包体 | 16010979 字节；`apksigner verify` v2 通过（debug 证书） |
 | 仓库 | [Memories-white/Auralis](https://github.com/Memories-white/Auralis) · public |
 | 已发布版本 | GitHub Release 与主分支分开管理；本次不自动创建 Release |
 | 当前界面架构 | Rust/WASM + Android WebView；不要恢复 Kotlin 页面或增加 JS 动画控制器 |
 
 ## 本次改动交接表
+
+| 需求 / 根因 | 修复行为与源码入口 | 验证 / 后续 |
+| :-- | :-- | :-- |
+| 从歌词栏 / 歌曲栏打开封面页时圆角突然变大 | 根因是共享封面浮层固定在 `12px`、播放页封面按形状为 `8/28/50%`，动画结束才切换节点。现在由 Rust 逐帧插值面积与圆角：`lib.rs::measure_morph/apply_sheet/begin_sheet`，浮层的 CSS 半径按缩放反算以保持屏幕像素半径一致，`#shared-artwork` 与 `#cover-art` 在同一帧交接；圆形封面同样连续 | 浏览器检查在真实 WASM 中采样中间帧：几何/半径连续、飞行中真实封面透明、结束时浮层移除且落地半径 28px；减少动态时跳过浮层并正确卸载 |
+| 底栏动画要对齐 Melox | 新增 Rust 弹簧模块 `ui/src/motion.rs`（闭式解，60/90/120/144Hz 同轨迹，可中途反向），底栏选中胶囊 `--nav-index` 由 `lib.rs::advance_dock/paint_dock` 每帧采样，图标由描边交叉淡入填充，颜色按 `--nav-p` 连续混合；槽位与胶囊几何一致 | 检查脚本断言指示器出现中间值、单调推进、最终与选中项误差 < 2px；广屏侧栏保留静态选中背景 |
+| 歌曲栏展开 / 收起要弹性 | 去掉 CSS 高度过渡，`--mini` 弹簧驱动卡片高度与内容显现（`lib.rs::advance_mini`、`style.css` `.mini`/`.mini-expanded`），暂停/切歌短暂展开、紧凑设置保持收起、播放页打开时不再在背后展开 | 展开帧高度 72→206 连续并轻微过冲后回落；检查断言展开类与折叠 |
+| 设置页要与 Melox 一致 | 参考 Melox 的分组列表：前导图标、标题/说明、尾部当前值、分隔线、独立子页。`presentation.rs` 新增 `ui-dock`、`ui-player`、`ui-list`、`ui-motion`、`lyric-type`、`lyric-effect`；`customization.rs::radios` 生成单选行；`RustWebView.kt` 的 `SETTINGS_ROUTES` 同步放行 | 浏览器检查覆盖入口子页、选项值经 `ui_preferences` 原生回传后保持、360px 无横向溢出；窄屏截图复核 |
+| 封面加载生硬 | 资源层只在字节可用时给 `img[src]`，CSS 用 `.artwork img[data-art-src][src]` 淡入，占位不闪；共享浮层复用已解码节点 | 真实图片请求仍合并为每资源 1 次；淡入只影响表现，不改变缓存与请求策略 |
+| 子页切换重播弹层动画 | `lib.rs::paint_overlay` 只在遮罩从关闭变为打开时添加 `enter` 类，音质/加入歌单等子页切换不再从底部重播 | 检查脚本在歌曲操作面板内切换子页后截图与断言 |
+| 减少动态 | 弹簧、浮层、流光、歌词位移统一走 `reduced` 分支：直接落位、不挂共享浮层，结束后移除 `mounted` | 新增断言：减少动态下打开/关闭播放页无浮层、封面不透明、播放器正确卸载 |
+| 范围与边界 | 未新增播放器功能，未改协议、鉴权与播放链路；没有移植 Melox 的液态折射、逐字歌词或本地扫描。广屏仍是侧栏导航，不做手机端横向分页手势 | 浏览器回调不等于实机 GPU 帧；真机未连接，圆角连续性与弹簧手感仍需实机复核 |
+
+## 0.5.0 验证表
+
+| 检查 | 结果 |
+| :-- | :-- |
+| 构建与签名 | `build.ps1 -Offline` 完整成功（UI WASM + NDK arm64 + Gradle），最终 APK `apksigner verify` v2 通过，哈希见上表 |
+| 单元/策略 | Rust UI 25、core 20、Java 播放顺序/图片缓存/取色/睡眠定时 4 组通过；新增弹簧轨迹、设置子页结构与单选值测试 |
+| 真实 WASM 浏览器 | `node tools/check-rust-ui.cjs` 通过：新增底栏指示器连续性与落点、封面共享元素中间帧/圆角/交接、减少动态卸载、设置子页与原生回传、窄屏无溢出；报告在忽略目录 `device-debug/rust-ui/browser/report.json` |
+| 视觉预览 | `node tools/preview-redesign.cjs` 输出 `device-debug/rust-ui/preview/`：浅/深色、三种底栏、播放页三页、歌曲栏展开、设置各子页；均为测试夹具 |
+| 实机 | 本轮 `adb devices` 为空；未安装、未验证真实设备上的底栏弹簧手感、共享元素在低端 WebView 的合成表现与真实 CDN 封面淡入 |
+| GitHub | 交付前推送 main；没有创建 Release 或上传 APK 到 Release |
+
+## 0.4.5 历史改动交接表
 
 | 需求 / 根因 | 修复行为与源码入口 | 验证 / 后续 |
 | :-- | :-- | :-- |
@@ -32,11 +57,10 @@
 
 | 检查 | 结果 |
 | :-- | :-- |
-| 构建与签名 | 完整build.ps1成功，code26，最终APK签名验证通过，哈希见上表 |
-| 单元/策略 | Rust UI 18、core 20、Java策略4组通过；新增统一图片身份、快照限量与凭据排除测试 |
-| 真实WASM浏览器 | 104个不同测试封面，每个资源最多请求1次；同图合并、跨页/播放器复用、节点保留，以及原页面/歌词/设置回归通过；报告在忽略目录device-debug/rust-ui/browser/report.json |
-| 实机 | 本轮ADB设备列表为空；未安装、未验证实际CDN请求或实际冷启动首帧时间；连接原手机后保留数据安装，检查关闭重开、离线、滚动、反复打开播放器 |
-| GitHub | 交付前推送main；没有创建Release或上传APK到Release |
+| 构建与签名 | 完整build.ps1成功，code26，最终APK签名验证通过 |
+| 单元/策略 | Rust UI 18、core 20、Java策略4组通过 |
+| 真实WASM浏览器 | 104个不同测试封面，每个资源最多请求1次；报告在忽略目录device-debug/rust-ui/browser/report.json |
+| 实机 | 本轮ADB设备列表为空，未安装或验证实际设备行为 |
 
 ## 0.4.4 历史改动交接表
 
@@ -59,14 +83,15 @@
 | 上游功能 | Auralis 对应 / 后续处理 |
 | :-- | :-- |
 | 主题模式、动态颜色、来源 | 原有系统/浅/深、壁纸/封面/自选色及完整调色板保留 |
-| 玻璃 / 普通 / iOS-like 底栏 | 对应磨砂 / 经典 / 悬浮胶囊；WebView `backdrop-filter` 是普通模糊，不声称复现原生液态折射 |
-| 紧凑播放器、封面形状、列表封面/时长 | 本次实现 |
-| 歌词字号、字重、居中、模糊、翻译 | 本次实现；显示已有翻译，不生成或请求新翻译 |
-| 动态流动背景、封面翻转 | 本次以Rust独立实现；不声称与上游像素和物理模型完全一致 |
+| 玻璃 / 普通 / iOS-like 底栏 | 对应磨砂 / 经典 / 悬浮胶囊；WebView `backdrop-filter` 是普通模糊，不声称复现原生液态折射；选中胶囊为 Rust 弹簧滑动，不是 CSS 过渡 |
+| 紧凑播放器、封面形状、列表封面/时长 | 已实现；歌曲栏展开改为弹簧采样 |
+| 歌词字号、字重、居中、模糊、翻译 | 已实现；显示已有翻译，不生成或请求新翻译 |
+| 动态流动背景、封面翻转 | 以Rust独立实现；不声称与上游像素和物理模型完全一致 |
 | 用户自选背景图片 | 未移植；后续须做系统照片选择、缩放缓存和真实文件恢复，不能仅放不可用入口 |
 | 状态栏隐藏、预测返回、触觉反馈 | 未移植；涉及系统窗口/返回生命周期，不把普通CSS过渡冒充系统功能 |
 | 本地文件名、扫描本地库、语言切换 | 非本次外观范围；在线曲库暂无本地扫描功能，不添加空壳入口 |
 | 逐词动画、对唱、罗马音与翻译语言选择 | 当前歌词只有行级LRC与已有翻译；需先扩展真实数据契约再适配 |
+| 底部导航横向滑动切页 | 未实现；当前通过点击导航切页，避免与播放页/歌词页手势冲突 |
 
 ## 0.4.4 验证记录
 
@@ -87,5 +112,7 @@
 2. `./test.ps1 -Offline`（设置 `JAVA_HOME=C:/Program Files/Java/jdk-21`）。
 3. `./build.ps1 -Offline -Aapt2Path <现有缓存中的aapt2.exe>`，SDK在工作区的 `BetterHeybox-NewAPK/android-sdk`，具体见 `docs/BUILD.md`。
 4. `PLAYWRIGHT_MODULE=.../career-ops/node_modules/playwright` 后运行 `node tools/check-rust-ui.cjs`。这是实际编译WASM，服务数据为测试夹具。
-5. 设备 `9ff29dd3`；包 `dev.qqlyric.app`；安装使用 `adb install -r`。禁止 `pm clear` 或卸载来完成界面测试。
-6. 先核对手机是否锁屏。真实账号场景不注入虚构歌曲；测试临时设置后恢复。截图留在忽略的 `device-debug/`，不要上传用户头像、曲库或二维码。
+5. 视觉迭代可运行 `node tools/preview-redesign.cjs`，帧与截图写入忽略目录 `device-debug/rust-ui/preview/`；它不是通过门槛。
+6. 设备 `9ff29dd3`；包 `dev.qqlyric.app`；安装使用 `adb install -r`。禁止 `pm clear` 或卸载来完成界面测试。
+7. 先核对手机是否锁屏。真实账号场景不注入虚构歌曲；测试临时设置后恢复。截图留在忽略的 `device-debug/`，不要上传用户头像、曲库或二维码。
+8. 自定义动效只写在 Rust（`motion.rs` / `lib.rs`）；CSS 只做表现与按压反馈，不要重新引入 JS 动画控制器或 CSS 高度过渡来替代弹簧。

@@ -29,7 +29,8 @@ Rust UI crate 负责页面、事件和动效，core crate 继续负责协议、�
 | :-- | :-- |
 | `ui/src/presentation.rs` | 页面层次、分组、内容顺序、设置依赖及操作描述 |
 | `ui/src/render.rs` / `style.css` | Rust DOM 构建、视觉样式、播放器与弹层 |
-| `ui/src/lib.rs` | 点击、键盘、手势、页面滚动、歌词弹簧与瞬时 UI 状态 |
+| `ui/src/lib.rs` | 点击、键盘、手势、页面滚动、底栏胶囊 / 歌曲栏 / 播放器共享元素、歌词弹簧与瞬时 UI 状态 |
+| `ui/src/motion.rs` | 闭式解弹簧与插值；自定义轨迹统一按 `dt` 采样，可中途反向且与帧率无关 |
 | `ui/src/labels.rs` | 字符串复用、参数格式化及外部内容转义 |
 | `MainActivity.kt` | Android 生命周期与媒体通知打开播放器的入口 |
 | `RustWebView.kt` | 本机资源、状态快照、业务动作及窗口 / 主题桥接 |

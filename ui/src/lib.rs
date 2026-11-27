@@ -5,6 +5,7 @@ mod customization;
 mod icons;
 mod labels;
 mod lyric_motion;
+mod motion;
 mod presentation;
 mod render;
 
@@ -12,6 +13,16 @@ use serde_json::{json, Value};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use wasm_bindgen::{prelude::*, JsCast};
 use web_sys::{Element, Event, HtmlElement, HtmlInputElement, PointerEvent};
+
+/// Geometry of the shared cover element while it travels between the mini player
+/// and the cover page. All values are viewport pixels measured once per transition.
+#[derive(Clone, Copy)]
+struct CoverMorph {
+    from: [f64; 4],
+    to: [f64; 4],
+    radius_from: f64,
+    radius_to: f64,
+}
 
 #[derive(Default)]
 struct App {
@@ -40,11 +51,16 @@ struct App {
     browsing_last: bool,
     clock_at: f64,
     mini_expanded: bool,
-    sheet_motion: lyric_motion::RowMotion,
-    sheet_target: f64,
-    release_frame_vote: bool,
+    mini_written: f64,
+    mini: motion::Spring,
+    dock: motion::Spring,
+    dock_ready: bool,
+    dock_page: String,
+    dock_count: usize,
+    written_dock: f64,
+    sheet_spring: motion::Spring,
+    morph: Option<CoverMorph>,
     sheet_bounds: [f64; 4],
-    artwork_bounds: [f64; 8],
     last_frame: f64,
     mini_until: f64,
     cover_flip_until: f64,
@@ -56,8 +72,10 @@ struct App {
     suppress_click: f64,
     scrubbing: bool,
     reduced: bool,
+    animation_vote: bool,
+    overlay_open: bool,
 }
-thread_local! {static APP:RefCell<App>=RefCell::new(App{filter:"all".into(),player_page:1,..App::default()});}
+thread_local! {static APP:RefCell<App>=RefCell::new(App{filter:"all".into(),player_page:1,dock_page:"home".into(),..App::default()});}
 fn doc() -> web_sys::Document {
     web_sys::window().unwrap().document().unwrap()
 }
@@ -92,6 +110,41 @@ fn style(node: &Element, key: &str, value: &str) {
 }
 fn class(node: &Element, name: &str, on: bool) {
     let _ = node.class_list().toggle_with_force(name, on);
+}
+fn rect(node: &Element) -> [f64; 4] {
+    let r = node.get_bounding_client_rect();
+    [r.x(), r.y(), r.width(), r.height()]
+}
+fn viewport() -> (f64, f64) {
+    let window = web_sys::window().unwrap();
+    (
+        window
+            .inner_width()
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(390.0),
+        window
+            .inner_height()
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(800.0),
+    )
+}
+/// Resolve a computed `border-radius` to pixels; percentages resolve against the
+/// shorter side. This is what lets a `50%` circular cover morph continuously.
+fn corner_radius(node: &Element, side: f64) -> f64 {
+    let value = web_sys::window()
+        .and_then(|w| w.get_computed_style(node).ok().flatten())
+        .map(|style| {
+            style
+                .get_property_value("border-top-left-radius")
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+    motion::length(&value, side).clamp(0.0, side.max(0.0))
+}
+fn find(selector: &str) -> Option<Element> {
+    doc().query_selector(selector).ok().flatten()
 }
 fn post(packet: Value) {
     let window = web_sys::window().unwrap();
@@ -664,6 +717,11 @@ impl App {
                     !b(&presentation, "root") && s(&self.data, "page").starts_with("monet"),
                 );
             }
+            self.dock_count = presentation["navigation"]
+                .as_array()
+                .map(|items| items.len())
+                .unwrap_or(0);
+            self.sync_dock();
             if let Some(main) = el("content").and_then(|e| e.dyn_into::<HtmlElement>().ok()) {
                 let _ = main.style().set_property("scroll-behavior", "auto");
                 main.set_scroll_top(*self.scrolls.get(&self.route_key()).unwrap_or(&0));
@@ -764,7 +822,117 @@ impl App {
         self.paint_progress();
         self.sync_lyrics();
     }
+
+    /// Route → dock slot. Settings sub-pages keep the settings slot selected so the
+    /// indicator does not shuttle while the user walks deeper into a group.
+    fn dock_index(&self) -> usize {
+        match s(&self.data, "page") {
+            "home" => 0,
+            "mine" => 1,
+            _ => 2,
+        }
+    }
+    fn dock_slot(&self) -> String {
+        let page = s(&self.data, "page");
+        if matches!(
+            page,
+            "settings"
+                | "appearance"
+                | "quality"
+                | "monet"
+                | "monet-source"
+                | "monet-style"
+                | "monet-spec"
+                | "storage"
+                | "about"
+                | "ui-customize"
+                | "ui-dock"
+                | "ui-player"
+                | "ui-list"
+                | "ui-motion"
+                | "lyrics-style"
+                | "lyric-type"
+                | "lyric-effect"
+        ) {
+            "settings".into()
+        } else {
+            page.to_owned()
+        }
+    }
+    /// Recompute the dock target after a repaint. The DOM was just replaced, so the
+    /// indicator position is written immediately to avoid a one-frame flash.
+    fn sync_dock(&mut self) {
+        let index = self.dock_index() as f64;
+        let slot = self.dock_slot();
+        if !self.dock_ready {
+            self.dock.place(index);
+            self.dock_ready = true;
+        } else if self.dock_page != slot {
+            self.dock.to(index);
+        }
+        self.dock_page = slot;
+        self.paint_dock();
+    }
+    fn paint_dock(&mut self) {
+        if let Some(nav) = el("navigation") {
+            self.written_dock = self.dock.position;
+            style(&nav, "--nav-index", &format!("{:.5}", self.dock.position));
+            style(&nav, "--nav-count", &format!("{}", self.dock_count.max(1)));
+            // The pill squashes slightly while travelling so the spring's overshoot
+            // reads as weight rather than a bounce past the slot.
+            let wobble = (self.dock.position - self.dock.position.round()).abs();
+            style(&nav, "--nav-wobble", &format!("{wobble:.4}"));
+        }
+        let count = self.dock_count.max(1);
+        for index in 0..count {
+            if let Ok(Some(item)) = doc().query_selector(&format!(
+                "#navigation .nav-item:nth-of-type({})",
+                index + 1
+            )) {
+                let distance = (index as f64 - self.dock.position).abs();
+                let proximity = (1.0 - distance).clamp(0.0, 1.0);
+                style(&item, "--nav-p", &format!("{proximity:.4}"));
+            }
+        }
+    }
+    fn advance_dock(&mut self, dt: f64) {
+        if self.dock.settled() {
+            return;
+        }
+        let position = self.dock.sample(dt, motion::Feel::DOCK);
+        if (position - self.written_dock).abs() > 0.0002 {
+            self.paint_dock();
+        }
+
+    }
+    fn advance_mini(&mut self, time: f64, dt: f64) {
+        let target = if !self.player && self.mini_until > time && customization::get(&self.data, "compact") != "on"
+        {
+            1.0
+        } else {
+            0.0
+        };
+        self.mini.to(target);
+        if self.mini.settled() && (self.mini.position - self.mini_written).abs() < 0.0005 {
+            return;
+        }
+        let value = self.mini.sample(dt, motion::Feel::REVEAL);
+        let expanded = target > 0.5;
+        if expanded != self.mini_expanded {
+            if let Some(mini) = el("mini-player") {
+                class(&mini, "expanded", expanded);
+            }
+            self.mini_expanded = expanded;
+        }
+        if let Some(mini) = el("mini-player") {
+            if (value - self.mini_written).abs() > 0.0004 {
+                self.mini_written = value;
+                style(&mini, "--mini", &format!("{value:.4}"));
+            }
+        }
+    }
     fn show_player_page(&mut self) {
+        self.fit_cover();
         if let Some(pages) = el("player-pages") {
             style(&pages, "--page", &self.player_page.to_string());
         }
@@ -776,111 +944,209 @@ impl App {
                 class(&dot, "selected", index == self.player_page);
             }
         }
-        if let (Some(pane), Some(cover)) = (
-            doc()
-                .query_selector(".cover-pane")
-                .ok()
-                .flatten()
-                .and_then(|e| e.dyn_into::<HtmlElement>().ok()),
-            el("cover-art"),
-        ) {
-            let size = (pane.client_width() - 64)
-                .min(pane.client_height() - 40)
-                .min(400)
-                .max(0);
-            style(&cover, "width", &format!("{size}px"));
-            style(&cover, "height", &format!("{size}px"));
+    }
+    /// The cover page keeps a square that fits the pane. Measuring the pane rather
+    /// than the transformed player keeps the size stable during the open animation.
+    fn fit_cover(&self) {
+        let (pane, cover) = match (find(".cover-pane"), el("cover-art")) {
+            (Some(pane), Some(cover)) => (pane, cover),
+            _ => return,
+        };
+        let side = (pane.client_width() - 64).min(pane.client_height() - 40).clamp(0, 460);
+        style(&cover, "width", &format!("{side}px"));
+        style(&cover, "height", &format!("{side}px"));
+    }
+    /// Measure the shared element endpoints. The cover is measured after the player
+    /// page has been laid out, so both ends come from real layout boxes; the radius
+    /// comes from computed styles, which is why a circular cover morphs correctly.
+    fn measure_morph(&mut self) -> Option<CoverMorph> {
+        let mini = el("mini-player")?;
+        let mini_art = mini.query_selector(".mini-art").ok().flatten()?;
+        let cover = el("cover-art")?;
+        let from = rect(&mini_art);
+        let to = rect(&cover);
+        self.sheet_bounds = rect(&mini);
+        if from[2] < 2.0 || from[3] < 2.0 || to[2] < 2.0 || to[3] < 2.0 {
+            return None;
         }
+        Some(CoverMorph {
+            from,
+            to,
+            radius_from: corner_radius(&mini_art, from[2].min(from[3])),
+            radius_to: corner_radius(&cover, to[2].min(to[3])),
+        })
+    }
+    fn mount_morph(&self) {
+        if let Some(old) = el("shared-artwork") {
+            old.remove();
+        }
+        let Some(mini_art) = el("mini-player").and_then(|mini| {
+            mini.query_selector(".mini-art").ok().flatten()
+        }) else {
+            return;
+        };
+        let Ok(overlay) = doc().create_element("div") else {
+            return;
+        };
+        overlay.set_id("shared-artwork");
+        if let Ok(copy) = mini_art.clone_node_with_deep(true) {
+            let _ = overlay.append_child(&copy);
+        }
+        if let Some(root) = el("app") {
+            let _ = root.append_child(&overlay);
+        }
+    }
+    fn unmount_morph(&mut self) {
+        if let Some(overlay) = el("shared-artwork") {
+            overlay.remove();
+        }
+        self.morph = None;
+    }
+    fn begin_sheet(&mut self, open: bool) {
+        self.player = open;
+        self.morph = if self.reduced {
+            None
+        } else {
+            self.measure_morph()
+        };
+        if self.reduced {
+            let target = if open { 1.0 } else { 0.0 };
+            self.sheet_spring.place(target);
+            self.sheet_spring.to(target);
+            self.apply_sheet(target);
+            return;
+        }
+        if open {
+            self.sheet_spring.place(0.0);
+        }
+        if self.morph.is_some() {
+            self.mount_morph();
+        }
+        self.sheet_spring.to(if open { 1.0 } else { 0.0 });
+        // Paint the first morph frame now so no unstyled overlay is ever shown.
+        self.apply_sheet(self.sheet_spring.position);
     }
     fn open_player(&mut self) {
         if self.player {
             return;
         }
-        self.player = true;
-        self.release_frame_vote = false;
-        post(json!({"type":"animation_rate","active":true}));
-        self.sheet_motion.place(self.sheet_target - 1.0, 0.0);
-        self.sheet_target = 1.0;
         self.player_page = 1;
         self.paint_player();
         if let Some(player) = el("player") {
-            self.player_origin(&player);
             class(&player, "mounted", true);
-            class(&player, "visible", false);
+            class(&player, "visible", true);
             let _ = player.set_attribute("aria-hidden", "false");
             let _ = player.remove_attribute("inert");
             let _ = player.get_bounding_client_rect();
-            let cb = Closure::once_into_js(move || {
-                class(&player, "visible", true);
-            });
-            let _ = web_sys::window()
-                .unwrap()
-                .request_animation_frame(cb.unchecked_ref());
         }
+        self.begin_sheet(true);
     }
     fn close_player(&mut self) {
-        self.player = false;
-        self.release_frame_vote = true;
-        self.sheet_motion.place(self.sheet_target, 0.0);
-        self.sheet_target = 0.0;
+        if !self.player {
+            return;
+        }
         if let Some(player) = el("player") {
-            self.player_origin(&player);
             class(&player, "visible", false);
             let _ = player.set_attribute("aria-hidden", "true");
             let _ = player.set_attribute("inert", "");
         }
+        self.begin_sheet(false);
     }
-    fn player_origin(&mut self, player: &Element) {
-        if let Some(mini) = el("mini-player") {
-            let r = mini.get_bounding_client_rect();
-            let window = web_sys::window().unwrap();
-            let w = window
-                .inner_width()
-                .ok()
-                .and_then(|v| v.as_f64())
-                .unwrap_or(390.0);
-            let h = window
-                .inner_height()
-                .ok()
-                .and_then(|v| v.as_f64())
-                .unwrap_or(800.0);
-            style(player, "--origin-x", &format!("{}px", r.x()));
-            style(player, "--origin-y", &format!("{}px", r.y()));
-            style(player, "--origin-sx", &(r.width() / w).to_string());
-            style(player, "--origin-sy", &(r.height() / h).to_string());
-            self.sheet_bounds = [r.x(), r.y(), r.width(), r.height()];
-            if let (Some(mini_art), Some(full_art)) = (
-                mini.query_selector(".mini-art").ok().flatten(),
-                el("cover-art"),
-            ) {
-                let a = mini_art.get_bounding_client_rect();
-                let b = full_art.get_bounding_client_rect();
-                self.artwork_bounds = [
-                    a.x(),
-                    a.y(),
-                    a.width(),
-                    a.height(),
-                    b.x(),
-                    b.y(),
-                    b.width(),
-                    b.height(),
-                ];
-                if let Some(old) = el("shared-artwork") {
-                    old.remove();
-                }
-                if let Ok(overlay) = doc().create_element("div") {
-                    overlay.set_id("shared-artwork");
-                    if let Ok(copy) = mini_art.clone_node_with_deep(true) {
-                        let _ = overlay.append_child(&copy);
-                    }
-                    if let Some(root) = el("app") {
-                        let _ = root.append_child(&overlay);
-                    }
-                }
+    /// Apply the player sheet and the shared artwork for a progress value in `0..=1`.
+    /// `0` is exactly the mini player card and `1` the full window, so every frame is
+    /// a continuous morph where the shared cover's corner radius is interpolated in
+    /// screen pixels instead of being switched by a class at the end.
+    fn apply_sheet(&mut self, p: f64) {
+        let (width, height) = viewport();
+        let [x, y, mw, mh] = self.sheet_bounds;
+        let q = 1.0 - p;
+        if let Some(player) = el("player") {
+            // The card radius shrinks with the clip inset so the sheet starts exactly
+            // on the mini player's rounded rectangle.
+            let radius = 30.0 * q * q;
+            style(
+                &player,
+                "clip-path",
+                &format!(
+                    "inset({}px {}px {}px {}px round {}px)",
+                    y * q,
+                    (width - x - mw).max(0.0) * q,
+                    (height - y - mh).max(0.0) * q,
+                    x * q,
+                    radius
+                ),
+            );
+            style(&player, "--sheet-alpha", if p > 0.0005 { "1" } else { "0" });
+            style(
+                &player,
+                "--sheet-content",
+                &motion::ease_out((p - 0.12) / 0.62).to_string(),
+            );
+        }
+        if p <= 0.0005 && !self.player {
+            if let Some(player) = el("player") {
+                class(&player, "mounted", false);
+            }
+        }
+        let Some(morph) = self.morph else {
+            // Reduced motion (or an unmeasurable layout) skips the shared morph but
+            // must still reveal the real cover and unmount the closed sheet.
+            if let Some(player) = el("player") {
+                style(&player, "--cover-opacity", "1");
+            }
+            return;
+        };
+        let done = if self.player { p >= 0.9995 } else { p <= 0.0005 };
+        if let Some(player) = el("player") {
+            style(&player, "--cover-opacity", if done { "1" } else { "0" });
+        }
+        if done {
+            self.unmount_morph();
+            return;
+        }
+        let geometry = motion::smooth(p);
+        let lift = p * 0.62 + geometry * 0.38;
+        let left = motion::lerp(morph.from[0], morph.to[0], geometry);
+        let top = motion::lerp(morph.from[1], morph.to[1], lift);
+        let side = motion::lerp(morph.from[2], morph.to[2], geometry);
+        let scale = (side / morph.to[2].max(1.0)).max(0.02);
+        // The overlay is scaled from a fixed box, so the CSS radius is divided by the
+        // scale to keep the *rendered* radius exactly on the interpolated value.
+        let radius = motion::lerp(morph.radius_from, morph.radius_to, geometry) / scale;
+        if let Some(overlay) = el("shared-artwork") {
+            style(&overlay, "width", &format!("{:.2}px", morph.to[2]));
+            style(&overlay, "height", &format!("{:.2}px", morph.to[3]));
+            style(
+                &overlay,
+                "transform",
+                &format!("translate3d({left:.3}px,{top:.3}px,0) scale({scale:.6})"),
+            );
+            style(&overlay, "border-radius", &format!("{radius:.2}px"));
+            style(&overlay, "opacity", "1");
+            if let Some(inner) = overlay.first_element_child() {
+                // The cloned artwork would otherwise keep its own 12px radius scaled.
+                style(&inner, "border-radius", "0");
+            }
+        }
+        if p <= 0.0005 && !self.player {
+            if let Some(player) = el("player") {
+                class(&player, "mounted", false);
             }
         }
     }
-    fn paint_overlay(&self) {
+    fn advance_sheet(&mut self, dt: f64) {
+        if self.sheet_spring.settled() && self.morph.is_none() {
+            return;
+        }
+        let p = self.sheet_spring.sample(dt, motion::Feel::SHEET);
+        self.apply_sheet(p);
+    }
+    fn paint_overlay(&mut self) {
+        // Sheets slide in only when the overlay opens; switching to a sub-sheet
+        // (quality, add-to-playlist) must not replay the entry animation.
+        let open = b(&self.data, "qrOpen") || !self.sheet.is_empty();
+        let entering = open && !self.overlay_open;
+        self.overlay_open = open;
         set_html(
             "overlays",
             &render::overlay(
@@ -888,6 +1154,7 @@ impl App {
                 &self.data,
                 &self.live,
                 !self.sheet_stack.is_empty(),
+                entering,
             ),
         );
     }
@@ -913,6 +1180,9 @@ impl App {
                     }
                 }
             }
+        }
+        if let Some(mini) = el("mini-player") {
+            style(&mini, "--progress", &format!("{}%", fraction * 100.0));
         }
         for (key, time) in [("position", position), ("duration", duration)] {
             if let Ok(nodes) = doc().query_selector_all(&format!("[data-time={key}]")) {
@@ -1008,95 +1278,24 @@ impl App {
         let next = self.limits.get(&route).copied().unwrap_or(100) + 100;
         self.limits.insert(route, next);
         self.paint_content();
-    }
-    fn animate_sheet(&mut self, dt: f64) {
-        if self.sheet_motion.offset == 0.0 {
-            if self.release_frame_vote {
-                self.release_frame_vote = false;
-                post(json!({"type":"animation_rate","active":false}));
-            }
-            return;
-        }
-        let p = if self.reduced {
-            self.sheet_motion = Default::default();
-            self.sheet_target
+    }    fn frame(&mut self, time: f64) {
+        let dt = if self.last_frame <= 0.0 {
+            1.0 / 60.0
         } else {
-            (self.sheet_target + self.sheet_motion.sample(dt, 420.0)).clamp(0.0, 1.0)
+            ((time - self.last_frame) / 1000.0).clamp(0.0, 0.1)
         };
-        if let Some(player) = el("player") {
-            let w = web_sys::window()
-                .unwrap()
-                .inner_width()
-                .ok()
-                .and_then(|v| v.as_f64())
-                .unwrap_or(1.0);
-            let h = web_sys::window()
-                .unwrap()
-                .inner_height()
-                .ok()
-                .and_then(|v| v.as_f64())
-                .unwrap_or(1.0);
-            let [x, y, mw, mh] = self.sheet_bounds;
-            let q = 1.0 - p;
-            style(
-                &player,
-                "clip-path",
-                &format!(
-                    "inset({}px {}px {}px {}px round {}px)",
-                    y * q,
-                    (w - x - mw).max(0.0) * q,
-                    (h - y - mh).max(0.0) * q,
-                    x * q,
-                    32.0 * q
-                ),
-            );
-            style(&player, "--sheet-alpha", if p > 0.001 { "1" } else { "0" });
-            style(
-                &player,
-                "--sheet-content",
-                &((p - 0.1) / 0.5).clamp(0.0, 1.0).to_string(),
-            );
-            style(
-                &player,
-                "--cover-opacity",
-                if p < 0.999 && p > 0.001 { "0" } else { "1" },
-            );
-        }
-        if let Some(art) = el("shared-artwork") {
-            let a = self.artwork_bounds;
-            let y = p * 0.6 + p * p * (3.0 - 2.0 * p) * 0.4;
-            style(
-                &art,
-                "transform",
-                &format!(
-                    "translate3d({}px,{}px,0) scale({},{})",
-                    a[0] + (a[4] - a[0]) * p,
-                    a[1] + (a[5] - a[1]) * y,
-                    (a[2] + (a[6] - a[2]) * p) / a[2].max(1.0),
-                    (a[3] + (a[7] - a[3]) * p) / a[3].max(1.0)
-                ),
-            );
-            style(&art, "width", &format!("{}px", a[2]));
-            style(&art, "height", &format!("{}px", a[3]));
-            style(
-                &art,
-                "opacity",
-                if p > 0.001 && p < 0.999 { "1" } else { "0" },
-            );
-        }
-    }
-    fn frame(&mut self, time: f64) {
-        let expanded = self.mini_until > time && customization::get(&self.data, "compact") != "on";
-        if expanded != self.mini_expanded {
-            if let Some(mini) = el("mini-player") {
-                class(&mini, "expanded", expanded);
-            }
-            self.mini_expanded = expanded;
-        }
-        let dt = ((time - self.last_frame) / 1000.0).clamp(0.0, 0.1);
         self.last_frame = time;
-        self.animate_sheet(dt);
-        if self.player
+        self.advance_dock(dt);
+        self.advance_mini(time, dt);
+        self.advance_sheet(dt);
+        let animating = !self.dock.settled()
+            || !self.mini.settled()
+            || !self.sheet_spring.settled()
+            || self.morph.is_some();
+        if animating != self.animation_vote {
+            self.animation_vote = animating;
+            post(json!({"type":"animation_rate","active":animating}));
+        }        if self.player
             && !self.reduced
             && b(&self.live, "playing")
             && customization::get(&self.data, "background") == "flow"

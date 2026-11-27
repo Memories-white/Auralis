@@ -74,8 +74,55 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     assert.ok(bounds.shelf >= 20, 'Shelf snaps away its leading gutter');
     await page.screenshot({ path: path.join(output, 'home-light.png') });
 
+    // Dock indicator: the pill is Rust-sampled, so every reading must be a valid
+    // intermediate slot position that ends exactly on the selected item.
+    data.page = 'mine'; await content();
+    const dockTrack = [];
+    for (let i = 0; i < 14; i++) {
+      dockTrack.push(await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('#navigation')).getPropertyValue('--nav-index')) || 0));
+      await page.waitForTimeout(16);
+    }
+    await page.waitForTimeout(600);
+    const dockSettled = await page.evaluate(() => {
+      const nav = document.querySelector('#navigation');
+      const pill = document.querySelector('.nav-pill').getBoundingClientRect();
+      const item = document.querySelectorAll('#navigation .nav-item')[1].getBoundingClientRect();
+      return { index: parseFloat(getComputedStyle(nav).getPropertyValue('--nav-index')), dx: Math.abs(pill.x - item.x), dw: Math.abs(pill.width - item.width) };
+    });
+    assert.ok(dockTrack.some(v => v > 0.02 && v < 1.98), `Dock indicator jumped instead of gliding: ${dockTrack.join(',')}`);
+    assert.ok(dockTrack.every((v, i) => i === 0 || v >= dockTrack[i - 1] - 0.001), 'Dock indicator reversed direction');
+    assert.ok(dockSettled.index > 0.999 && dockSettled.index < 1.001, `Dock indicator did not settle on slot 1: ${dockSettled.index}`);
+    assert.ok(dockSettled.dx < 2 && dockSettled.dw < 2, 'Dock indicator does not match the selected item');
+    data.page = 'home'; await content(); await page.waitForTimeout(700);
+
+    // Cover morph: the shared element must interpolate the corner radius instead of
+    // switching classes at the end, and the real cover only appears once it lands.
     await page.locator('#mini-player .mini-identity>span:not(.artwork)').click();
+    const morph = [];
+    for (let i = 0; i < 12; i++) {
+      morph.push(await page.evaluate(() => {
+        const overlay = document.querySelector('#shared-artwork');
+        const cover = document.querySelector('#cover-art');
+        return {
+          active: !!overlay,
+          radius: overlay ? parseFloat(overlay.style.borderRadius) : null,
+          scale: overlay ? parseFloat((overlay.style.transform.match(/scale\(([^)]+)\)/) || [])[1]) : null,
+          coverOpacity: cover ? Number(getComputedStyle(cover).opacity) : null,
+        };
+      }));
+      await page.waitForTimeout(26);
+    }
     await page.waitForTimeout(750);
+    const landed = await page.evaluate(() => ({
+      overlay: !!document.querySelector('#shared-artwork'),
+      radius: getComputedStyle(document.querySelector('#cover-art')).borderRadius,
+      coverOpacity: Number(getComputedStyle(document.querySelector('#cover-art')).opacity),
+    }));
+    assert.ok(morph.some(f => f.active), 'Shared cover overlay never mounted');
+    assert.ok(morph.filter(f => f.active).length >= 3, 'Cover morph completed too fast to be continuous');
+    assert.ok(morph.filter(f => f.coverOpacity === 0).length >= 3, 'Real cover was visible while the morph was in flight');
+    assert.ok(!landed.overlay && Math.abs(landed.coverOpacity - 1) < 0.01, 'Shared cover did not hand over cleanly');
+    assert.equal(landed.radius, '28px');
     assert.ok(await page.locator('#player').evaluate(e => e.classList.contains('visible')));
     const opened = await page.locator('#player').boundingBox();
     assert.ok(Math.abs(opened.y) < 1 && Math.abs(opened.width - 411) < 1, 'Player did not expand to window');
@@ -127,19 +174,36 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     assert.ok(await page.locator('[data-action="navigate:monet"]').isDisabled());
     await page.screenshot({ path: path.join(output, 'settings-dark.png') });
     data.page = 'ui-customize'; await content();
+    assert.ok(await page.locator('[data-action="navigate:ui-dock"]').isVisible(), 'Interface hub lost the dock page');
+    await page.locator('[data-action="navigate:ui-dock"]').click();
+    // The mock bridge answers navigation by publishing the page Rust asked for.
+    data.page = await page.evaluate(() => window.__actions.filter(a => a.type === 'navigate').at(-1).page);
+    await content();
     await page.locator('[data-action="ui:bar:floating"]').click();
     assert.equal(await page.locator('#app').getAttribute('data-ui-bar'), 'floating');
+    // Mirror the native round-trip: the stored preferences travel back in the next
+    // content packet, so apply them before switching pages.
+    const applyPrefs = async () => {
+      const value = await page.evaluate(() => window.__actions.filter(a => a.type === 'ui_preferences').at(-1)?.value);
+      if (value) data.uiPreferences = value;
+    };
+    await applyPrefs();
     await page.locator('[data-action="ui:compact:on"]').click();
+    await applyPrefs();
+    data.page = 'ui-player'; await content();
     await page.locator('[data-action="ui:shape:circle"]').click();
-    const saved = await page.evaluate(() => window.__actions.filter(a => a.type === 'ui_preferences').at(-1));
+    await applyPrefs();
+    const saved = { value: data.uiPreferences };
     assert.equal(saved.value.bar, 'floating'); assert.equal(saved.value.compact, 'on');
-    data.uiPreferences = saved.value;
     await content(); // A native state round-trip must retain the selection.
     assert.equal(await page.locator('#app').getAttribute('data-ui-shape'), 'circle');
     await page.waitForTimeout(450); await page.screenshot({ path: path.join(output, 'customization-dark.png') });
     data.page = 'lyrics-style'; await content();
+    assert.ok(await page.locator('[data-action="navigate:lyric-type"]').isVisible(), 'Lyrics hub lost the type page');
+    data.page = 'lyric-type'; await content();
     await page.locator('[data-action="ui:lyricSize:36"]').click();
     await page.locator('[data-action="ui:lyricAlign:center"]').click();
+    data.page = 'lyric-effect'; await content();
     await page.locator('[data-action="ui:lyricBlur:off"]').click();
     assert.equal(await page.locator('#app').getAttribute('data-ui-lyricblur'), 'off');
     await page.waitForTimeout(450); await page.screenshot({ path: path.join(output, 'lyrics-settings-dark.png') });
@@ -179,9 +243,17 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     await page.locator('[data-action=player_lyrics]').click(); await page.waitForTimeout(150);
     assert.equal(await page.locator('#player .transport').evaluate(e => getComputedStyle(e).display), 'none');
     assert.notEqual(await page.locator('.lyric-progress').evaluate(e => getComputedStyle(e).display), 'none');
+    // Reduced motion skips the shared-element morph but must still open/close and
+    // leave no mounted player or floating overlay behind.
+    await page.locator('[data-action=close_player]').click(); await page.waitForTimeout(500);
+    assert.ok(!(await page.locator('#player').evaluate(e => e.classList.contains('mounted'))), 'Reduced motion left the player mounted');
+    assert.equal(await page.locator('#shared-artwork').count(), 0);
+    await page.locator('#mini-player .mini-identity>span:not(.artwork)').click(); await page.waitForTimeout(500);
+    assert.equal(await page.locator('#shared-artwork').count(), 0, 'Reduced motion still mounted the shared morph');
+    assert.ok(Math.abs(Number(await page.locator('#cover-art').evaluate(e => getComputedStyle(e).opacity)) - 1) < 0.01);
     assert.ok([...artworkRequests.values()].every(n => n === 1), 'A cached artwork was requested more than once');
     assert.equal(errors.length, 0, errors.join('\n'));
-    console.log('PASS: real Rust/WASM boot, safe layout, shelf gutter, one daily entry, player expansion, left-swipe lyrics, exact active line, manual-follow recovery, automatic mini collapse, search/IME focus, playlist filters/loading/retry, top/locate, settings dependencies, half-height sheet and wide layout.');
-    fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ result: 'passed', engine: 'real Rust/WASM; mock native service bridge', artwork: { unique: artworkRequests.size, maximumRequestsPerArtwork: Math.max(...artworkRequests.values()), decodedNodeRetained: true, pageAndPlayerReuse: true }, focal, bounds, screenshots: fs.readdirSync(output).filter(n => n.endsWith('.png')) }, null, 2));
+    console.log('PASS: real Rust/WASM boot, safe layout, shelf gutter, one daily entry, continuous dock indicator, continuous cover morph with matching corner radius, player expansion, left-swipe lyrics, exact active line, manual-follow recovery, spring mini collapse, search/IME focus, playlist filters/loading/retry, top/locate, settings hub/sub-pages with native round-trip, half-height sheet and wide layout.');
+    fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ result: 'passed', engine: 'real Rust/WASM; mock native service bridge', artwork: { unique: artworkRequests.size, maximumRequestsPerArtwork: Math.max(...artworkRequests.values()), decodedNodeRetained: true, pageAndPlayerReuse: true }, dock: dockSettled, cover: { frames: morph.filter(f => f.active).length, landed: landed.radius, handedOver: !landed.overlay }, focal, bounds, screenshots: fs.readdirSync(output).filter(n => n.endsWith('.png')) }, null, 2));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

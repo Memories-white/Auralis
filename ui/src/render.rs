@@ -1,6 +1,6 @@
 use crate::{
     b, format_time,
-    icons::icon,
+    icons::{icon, icon_pair},
     labels::{esc, label, text},
     n, s,
 };
@@ -73,6 +73,28 @@ fn attr(action: &str, enabled: bool) -> String {
         )
     }
 }
+fn glyph(name: &str) -> String {
+    if name.is_empty() {
+        String::new()
+    } else {
+        format!("<span class=\"pref-glyph\">{}</span>", icon(name))
+    }
+}
+fn trailing_value(value: &Value) -> String {
+    if value.is_null() {
+        return String::new();
+    }
+    let text = if value.is_object() {
+        text(value)
+    } else {
+        value.as_str().unwrap_or("").to_owned()
+    };
+    if text.is_empty() {
+        String::new()
+    } else {
+        format!("<span class=\"pref-value\">{}</span>", esc(&text))
+    }
+}
 
 pub fn header(p: &Value, data: &Value) -> String {
     let root = b(p, "root");
@@ -103,9 +125,28 @@ pub fn navigation(p: &Value) -> String {
     if !b(p, "root") {
         return String::new();
     }
-    p["navigation"].as_array().map(|items|items.iter().map(|item|{
-        format!("<button class=\"nav-item {}\" data-action=\"navigate:{}\" {}>{}<span>{}</span></button>",if item["route"]==p["route"]{"selected"}else{""},esc(s(item,"route")),if item["route"]==p["route"]{"aria-current=\"page\""}else{""},icon(s(item,"icon")),esc(&text(&item["text"])))
-    }).collect()).unwrap_or_default()
+    let items = p["navigation"].as_array().cloned().unwrap_or_default();
+    let count = items.len().max(1);
+    let selected = items
+        .iter()
+        .position(|item| item["route"] == p["route"])
+        .unwrap_or(0);
+    // The indicator is a sibling of the items, so Rust can glide it between equal
+    // slots without measuring each button. Slot widths are equal by CSS.
+    let mut html = String::from("<i class=\"nav-pill\" aria-hidden=\"true\"></i>");
+    for (index, item) in items.iter().enumerate() {
+        let current = index == selected;
+        html.push_str(&format!(
+            "<button class=\"nav-item {}\" data-action=\"navigate:{}\" data-index=\"{index}\" style=\"--slot:{}\" {}>{}<span>{}</span></button>",
+            if current { "selected" } else { "" },
+            esc(s(item, "route")),
+            index as f64 / count as f64,
+            if current { "aria-current=\"page\"" } else { "" },
+            icon_pair(s(item, "icon")),
+            esc(&text(&item["text"]))
+        ));
+    }
+    html
 }
 
 pub fn content(p: &Value, data: &Value, live: &Value) -> String {
@@ -151,10 +192,6 @@ fn node(v: &Value, data: &Value, live: &Value, parent_enabled: bool) -> String {
     match s(v,"kind"){
         "card"=>format!("<div class=\"card {}\" style=\"{style}--padding:{}px\"{}>{}</div>",if action_id.is_empty(){""}else{"pressable"},v["padding"].as_f64().unwrap_or(20.0),attr(action_id,active),children()),
         "row"=>format!("<div class=row style=\"{style};margin-bottom:{}px\">{}</div>",v["bottom"].as_f64().unwrap_or(0.0),children()),
-        "appearance-option"=>{
-            let key=s(v,"key");
-            format!("<fieldset class=appearance-option><legend>{}</legend><div class=appearance-choices>{}</div></fieldset>",esc(s(v,"title")),v["items"].as_array().map(|items|items.iter().map(|item|format!("<button data-action=\"ui:{}:{}\" aria-pressed=\"{}\" class=\"{}\">{}</button>",esc(key),esc(s(item,"id")),item["id"]==v["selected"],if item["id"]==v["selected"]{"selected"}else{""},esc(s(item,"title")))).collect::<String>()).unwrap_or_default())
-        }
         "column"=>format!("<div class=column style=\"{style}\">{}</div>",children()),
         "text"=>format!("<div class=\"text {}\">{}</div>",esc(s(v,"style")),esc(&text(&v["text"]))),
         "icon"=>format!("<span class=\"tile-icon\">{}</span>",icon(s(v,"icon"))),
@@ -166,9 +203,18 @@ fn node(v: &Value, data: &Value, live: &Value, parent_enabled: bool) -> String {
         }
         "preference"|"radio"|"switch"=>{
             let kind=s(v,"kind");
-            let trailing=if kind=="switch"{format!("<span class=\"switch {}\" role=switch aria-checked=\"{}\"><i></i></span>",if b(v,"checked"){"checked"}else{""},b(v,"checked"))}else if kind=="radio"{format!("<span class=\"radio {}\" role=radio aria-checked=\"{}\">{}</span>",if b(v,"selected"){"checked"}else{""},b(v,"selected"),icon("check"))}else{icon("chevron")};
+            let selected=b(v,"selected")||b(v,"checked");
+            let trailing=if kind=="switch"{format!("<span class=\"switch {}\" role=switch aria-checked=\"{}\"><i></i></span>",if b(v,"checked"){"checked"}else{""},b(v,"checked"))}else if kind=="radio"{format!("<span class=\"radio {}\" role=radio aria-checked=\"{}\">{}</span>",if selected{"checked"}else{""},selected,icon("check"))}else{format!("<span class=pref-tail>{}</span>",icon("chevron"))};
             let summary=text(&v["summary"]);
-            format!("<button class=preference data-action=\"{}\" {}><span><strong>{}</strong>{}</span>{trailing}</button>",esc(action_id),if active{""}else{"disabled"},esc(&text(&v["text"])),if summary.is_empty(){String::new()}else{format!("<small>{}</small>",esc(&summary))})
+            let glyph_html = glyph(s(v,"glyph"));
+            format!("<button class=\"preference pref-{kind}\" data-action=\"{}\" {} aria-pressed=\"{}\">{glyph_html}<span class=pref-text><strong>{}</strong>{}</span>{}{trailing}</button>",
+                esc(action_id),
+                if active{""}else{"disabled"},
+                selected,
+                esc(&text(&v["text"])),
+                if summary.is_empty(){String::new()}else{format!("<small>{}</small>",esc(&summary))},
+                trailing_value(&v["value"]),
+            )
         }
         "shelf"=>{
             let id=s(v,"source");let playlists=b(v,"playlists");
@@ -245,10 +291,34 @@ pub fn mini(live: &Value, data: &Value) -> String {
     } else {
         s(live, "artist")
     };
-    format!("<div class=mini-identity>{}<span><strong>{}</strong><small>{}</small></span><div class=mini-compact>{}{}</div>{}</div><div class=mini-progress>{}</div><div class=mini-expanded>{}{}<div class=mini-tools>{}{}</div></div>",
-        art(image,false,"mini-art"),escaped_or(title,"select_song"),esc(artist),
-        action("play",&label(if b(live,"playing"){"pause"}else{"play"}),if b(live,"playing"){"pause"}else{"play"},""),action("queue",&label("play_queue"),"queue",""),action("collapse_mini",&label("collapse_player"),"down","collapse-mini"),
-        seek(),times(),transport(live,true),action("favorite",&label("local_favorites"),"heart",if b(live,"favorite"){"active"}else{""}),action("queue",&label("play_queue"),"queue",""))
+    format!(
+        "<div class=mini-line aria-hidden=true></div>\
+         <div class=mini-identity>{art}<span class=mini-meta><strong>{title}</strong><small>{artist}</small></span>\
+         <div class=mini-compact>{play}{queue}</div>\
+         <button class=\"icon-button collapse-mini\" data-action=collapse_mini aria-label=\"{collapse}\">{down}</button></div>\
+         <div class=mini-expanded><div class=mini-progress>{seek}{times}</div>{transport}<div class=mini-tools>{favorite}{queue}</div></div>",
+        art = art(image, false, "mini-art"),
+        title = escaped_or(title, "select_song"),
+        artist = esc(artist),
+        play = action(
+            "play",
+            &label(if b(live, "playing") { "pause" } else { "play" }),
+            if b(live, "playing") { "pause" } else { "play" },
+            ""
+        ),
+        queue = action("queue", &label("play_queue"), "queue", ""),
+        collapse = esc(&label("collapse_player")),
+        down = icon("down"),
+        seek = seek(),
+        times = times(),
+        transport = transport(live, true),
+        favorite = action(
+            "favorite",
+            &label("local_favorites"),
+            "heart",
+            if b(live, "favorite") { "active" } else { "" }
+        ),
+    )
 }
 pub fn player(
     live: &Value,
@@ -288,9 +358,18 @@ pub fn player(
         "SINGLE" => "repeat_one",
         _ => "order",
     };
-    format!("<div class=player-wash>{}</div><div class=player-safe><div class=player-toolbar>{}<span>{}</span>{}</div><div class=player-identity>{}<div><h2>{}</h2><p>{}</p></div></div><div id=player-pages class=player-pages><div class=player-strip><div class=information-pane>{information}</div><div class=cover-pane><button id=cover-art class=cover-art data-action=song-actions aria-label=\"{}\">{}</button></div><div id=lyric-viewport class=lyric-viewport><div id=lyric-lines class=lyric-lines>{lyric_lines}</div></div></div></div><div class=page-dots>{}</div><div class=player-footer><div class=cover-seek>{}{}</div><div class=playback-error role=status>{}</div>{}<div class=player-tools>{}{}{}{}{}</div><div class=lyric-progress>{}</div></div></div>",
+    let identity_art = if s(live, "cover").is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<button class=identity-open data-action=player_cover aria-label=\"{}\">{}</button>",
+            esc(&label("cover_page")),
+            art(s(live, "cover"), false, "identity-art")
+        )
+    };
+    format!("<div class=player-wash>{}</div><div class=player-safe><div class=player-toolbar>{}<span>{}</span>{}</div><div class=player-identity>{identity_art}<div><h2>{}</h2><p>{}</p></div></div><div id=player-pages class=player-pages><div class=player-strip><div class=information-pane>{information}</div><div class=cover-pane><button id=cover-art class=cover-art data-action=song-actions aria-label=\"{}\">{}</button></div><div id=lyric-viewport class=lyric-viewport><div id=lyric-lines class=lyric-lines>{lyric_lines}</div></div></div></div><div class=page-dots>{}</div><div class=player-footer><div class=cover-seek>{}{}</div><div class=playback-error role=status>{}</div>{}<div class=player-tools>{}{}{}{}{}</div><div class=lyric-progress>{}</div></div></div>",
         art(s(live,"cover"),false,"player-cover"),action("close_player",&label("collapse_player"),"down",""),label("now_playing"),action("song-actions",&label("song_actions"),"more",""),
-        art(s(live,"cover"),false,"identity-art"),escaped_or(s(live,"title"),"not_playing"),esc(s(live,"artist")),label("song_actions"),art(s(live,"cover"),false,"player-cover"),
+        escaped_or(s(live,"title"),"not_playing"),esc(s(live,"artist")),label("song_actions"),art(s(live,"cover"),false,"player-cover"),
         ["player_info","player_cover","player_lyrics"].iter().enumerate().map(|(i,a)|format!("<button id=page-dot-{i} data-action={a} aria-label=\"{}\"></button>",label(["song_information","cover_page","lyrics_page"][i]))).collect::<String>(),
         seek(),times(),esc(s(live,"playbackStatus")),transport(live,false),
         action("mode",&label("playback_mode"),mode,if mode=="order"{""}else{"active"}),format!("<button class=quality-badge data-action=quality>{}</button>",esc(quality_badge(live))),
@@ -322,10 +401,16 @@ fn quality_choices(data: &Value, live: &Value) -> String {
     for quality in ["auto", "sq", "hq", "standard"] {
         html.push_str(&node(&json!({"kind":"radio","text":{"resource":format!("quality_{quality}")},"summary":{"resource":format!("quality_{quality}_summary")},"selected":s(data,"quality")==quality,"action":format!("quality:{quality}")}),data,live,true));
     }
-    html.push_str(&node(&json!({"kind":"switch","text":{"resource":"quality_fallback"},"summary":{"resource":"quality_fallback_summary"},"checked":b(data,"qualityFallback"),"enabled":matches!(s(data,"quality"),"sq"|"hq"),"action":"fallback"}),data,live,true));
+    html.push_str(&node(&json!({"kind":"switch","text":{"resource":"quality_fallback"},"summary":{"resource":"quality_fallback_summary"},"checked":b(data,"quality_fallback"),"enabled":matches!(s(data,"quality"),"sq"|"hq"),"action":"fallback"}),data,live,true));
     html
 }
-pub fn overlay(sheet: &str, data: &Value, live: &Value, can_back: bool) -> String {
+pub fn overlay(
+    sheet: &str,
+    data: &Value,
+    live: &Value,
+    can_back: bool,
+    entering: bool,
+) -> String {
     let qr = b(data, "qrOpen");
     if !qr && sheet.is_empty() {
         return String::new();
@@ -404,7 +489,7 @@ pub fn overlay(sheet: &str, data: &Value, live: &Value, can_back: bool) -> Strin
             _ => String::new(),
         }
     };
-    format!("<div class=modal-backdrop data-action={close}></div><section class=\"sheet {}\" role=dialog aria-modal=true aria-label=\"{}\"><div class=sheet-handle></div><header>{}<h2>{title}</h2>{}</header><div class=sheet-content>{content}<p class=collection-message role=status>{}</p></div></section>",if qr{"qr-sheet"}else if can_back||matches!(sheet,"song-actions"|"add-playlist"){"half-sheet"}else{""},esc(&title),if can_back&&!qr{action("sheet_back",&label("back"),"back","")}else{String::new()},action(close,&label("cancel"),"close",""),esc(s(data,"collectionMessage")))
+    format!("<div class=modal-backdrop data-action={close}></div><section class=\"sheet {} {}\" role=dialog aria-modal=true aria-label=\"{}\"><div class=sheet-handle></div><header>{}<h2>{title}</h2>{}</header><div class=sheet-content>{content}<p class=collection-message role=status>{}</p></div></section>",if qr{"qr-sheet"}else if can_back||matches!(sheet,"song-actions"|"add-playlist"){"half-sheet"}else{""},if entering{"enter"}else{""},esc(&title),if can_back&&!qr{action("sheet_back",&label("back"),"back","")}else{String::new()},action(close,&label("cancel"),"close",""),esc(s(data,"collectionMessage")))
 }
 pub fn floating(show_top: bool, locate: bool) -> String {
     format!(
