@@ -9,6 +9,7 @@ mod lyric_motion;
 mod motion;
 mod presentation;
 mod render;
+mod shell;
 
 use serde_json::{json, Value};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
@@ -38,12 +39,18 @@ struct SheetLayers {
     width: f64,
     height: f64,
 }
-#[derive(Clone, Copy)]
-struct NavDrag {
-    left: f64,
-    slot: f64,
-    start: f64,
-    moved: bool,
+
+#[derive(Clone)]
+struct OverlayLayers {
+    sheet: Element,
+    backdrop: Element,
+    height: f64,
+}
+#[derive(Clone)]
+struct HeaderLayers {
+    header: Element,
+    large: Element,
+    compact: Element,
 }
 #[derive(Default)]
 struct App {
@@ -81,14 +88,11 @@ struct App {
     mini_written: f64,
     mini: motion::Spring,
     dock: motion::Spring,
-    nav_press: motion::Spring,
-    nav_drag: Option<NavDrag>,
     nav_element: Option<Element>,
     nav_nodes: Vec<Element>,
     dock_ready: bool,
     dock_page: String,
     dock_count: usize,
-    written_dock: f64,
     sheet_spring: motion::Spring,
     morph: Option<CoverMorph>,
     sheet_layers: Option<SheetLayers>,
@@ -107,6 +111,14 @@ struct App {
     reduced: bool,
     animation_vote: bool,
     overlay_open: bool,
+    overlay_closing: bool,
+    overlay_spring: motion::Spring,
+    overlay_layers: Option<OverlayLayers>,
+    sheet_drag: Option<(f64, f64)>,
+    header_layers: Option<HeaderLayers>,
+    content_layer: Option<Element>,
+    route_spring: motion::Spring,
+    route_direction: f64,
 }
 thread_local! {static APP:RefCell<App>=RefCell::new(App{filter:"all".into(),player_page:1,dock_page:"home".into(),..App::default()});}
 fn doc() -> web_sys::Document {
@@ -202,7 +214,7 @@ pub fn start() -> Result<(), JsValue> {
     let css = document.create_element("style")?;
     css.set_text_content(Some(include_str!("style.css")));
     document.head().unwrap().append_child(&css)?;
-    document.body().unwrap().set_inner_html("<div id=app><header id=header></header><main id=content tabindex=-1></main><div id=float-actions></div><footer id=dock><div id=mini-player class=mini data-action=open_player role=button tabindex=0></div><nav id=navigation></nav></footer><section id=player aria-hidden=true inert></section><div id=overlays></div></div>");
+    document.body().unwrap().set_inner_html("<div id=app><header id=header></header><main id=content tabindex=-1></main><div id=float-actions></div><footer id=dock><div id=mini-player class=mini data-action=open_player role=button tabindex=0></div><nav id=navigation role=tablist aria-label=主导航></nav></footer><section id=player aria-hidden=true inert></section><div id=overlays></div></div>");
     let click = Closure::<dyn FnMut(Event)>::new(|event: Event| {
         let target = event
             .target()
@@ -312,35 +324,37 @@ pub fn start() -> Result<(), JsValue> {
             .unwrap_or("");
         APP.with(|state| {
             let mut app = state.borrow_mut();
+            let zone = if zone.is_empty()
+                && event.client_x() < 24
+                && !app.overlay_open
+                && !app.player
+                && shell::settings(s(&app.data, "page"))
+                && s(&app.data, "page") != "settings"
+            {
+                "back"
+            } else {
+                zone
+            };
             app.pointer = Some((
                 event.client_x() as f64,
                 event.client_y() as f64,
                 zone.into(),
             ));
-            if let Some(nav) = element
-                .as_ref()
-                .and_then(|e| e.closest("#navigation").ok().flatten())
+            if !app.overlay_closing
+                && element.as_ref().is_some_and(|e| {
+                    e.closest(".sheet-handle,#sheet-header")
+                        .ok()
+                        .flatten()
+                        .is_some()
+                        && e.closest("button").ok().flatten().is_none()
+                })
             {
-                if viewport().0 >= 700.0 {
-                    return;
-                }
-                let bounds = rect(&nav);
-                let inset = match customization::get(&app.data, "bar") {
-                    "floating" => 4.0,
-                    "normal" => 10.0,
-                    _ => 8.0,
-                };
-                let slot = ((nav.client_width() as f64 - 2.0 * inset)
-                    / app.dock_count.max(1) as f64)
-                    .max(1.0);
-                app.nav_drag = Some(NavDrag {
-                    left: bounds[0] + inset,
-                    slot,
-                    start: event.client_x() as f64,
-                    moved: false,
-                });
-                app.nav_press.to(1.0);
+                app.sheet_drag = Some((
+                    event.client_y() as f64,
+                    app.overlay_spring.position.clamp(0.0, 1.0),
+                ));
             }
+
             if element
                 .and_then(|e| e.closest("#lyric-viewport").ok().flatten())
                 .is_some()
@@ -351,39 +365,52 @@ pub fn start() -> Result<(), JsValue> {
     });
     document.add_event_listener_with_callback("pointerdown", down.as_ref().unchecked_ref())?;
     down.forget();
-    let nav_move = Closure::<dyn FnMut(PointerEvent)>::new(|event: PointerEvent| {
+    let sheet_move = Closure::<dyn FnMut(PointerEvent)>::new(|event: PointerEvent| {
         APP.with(|state| {
             let mut app = state.borrow_mut();
-            if let Some(mut drag) = app.nav_drag {
-                if (event.client_x() as f64 - drag.start).abs() > 4.0 || drag.moved {
-                    drag.moved = true;
-                    app.nav_drag = Some(drag);
-                    let index = ((event.client_x() as f64 - drag.left) / drag.slot - 0.5)
-                        .clamp(0.0, app.dock_count.saturating_sub(1) as f64);
-                    app.dock.place(index);
-                    app.dock.to(index);
-                    app.paint_dock();
+            if let Some((y, start)) = app.sheet_drag {
+                let dy = (event.client_y() as f64 - y).max(0.0);
+                if let Some(layers) = app.overlay_layers.as_ref() {
+                    let p = (start - dy / layers.height.max(1.0)).clamp(0.0, 1.0);
+                    app.overlay_spring.place(p);
+                    app.apply_overlay();
+                }
+                if dy > 8.0 {
+                    app.suppress_click = now() + 350.0;
                 }
             }
         });
     });
-    document.add_event_listener_with_callback("pointermove", nav_move.as_ref().unchecked_ref())?;
-    nav_move.forget();
+    document
+        .add_event_listener_with_callback("pointermove", sheet_move.as_ref().unchecked_ref())?;
+    sheet_move.forget();
+
     let up = Closure::<dyn FnMut(PointerEvent)>::new(|event: PointerEvent| {
         APP.with(|state| {
             let mut app = state.borrow_mut();
-            if let Some(drag) = app.nav_drag.take() {
-                app.nav_press.to(0.0);
-                if drag.moved {
-                    let index = app.dock.position.round().clamp(0.0, 2.0) as usize;
-                    app.dock.to(index as f64);
-                    app.suppress_click = now() + 350.0;
-                    app.act(&format!("navigate:{}", ["home", "mine", "settings"][index]));
+            if app.sheet_drag.take().is_some() {
+                if app.overlay_spring.position < 0.82 {
+                    if b(&app.data, "qrOpen") {
+                        app.data["qrOpen"] = json!(false);
+                        post(json!({"type":"dismiss_login"}));
+                    }
+                    app.sheet.clear();
+                    app.sheet_stack.clear();
+                    app.paint_overlay();
+                } else {
+                    app.overlay_spring.to(1.0);
                 }
             }
+
             if let Some((x, y, zone)) = app.pointer.take() {
                 let dx = event.client_x() as f64 - x;
                 let dy = event.client_y() as f64 - y;
+                if zone == "back" && dx > 72.0 && dx > dy.abs() * 1.35 {
+                    app.route_direction = -1.0;
+                    app.save_scroll();
+                    app.suppress_click = now() + 350.0;
+                    post(json!({"type":"back"}));
+                }
                 if zone == "player" && dx.abs() > 65.0 && dx.abs() > dy.abs() * 1.35 {
                     app.player_page = (app.player_page as i32 + if dx < 0.0 { 1 } else { -1 })
                         .clamp(0, 2) as usize;
@@ -402,11 +429,10 @@ pub fn start() -> Result<(), JsValue> {
         APP.with(|s| {
             let mut app = s.borrow_mut();
             app.pointer = None;
-            if app.nav_drag.take().is_some() {
-                app.nav_press.to(0.0);
-                let index = app.dock_index();
-                app.dock.to(index as f64);
+            if app.sheet_drag.take().is_some() {
+                app.overlay_spring.to(1.0);
             }
+
             if app.browse_until.is_infinite() {
                 app.browse_until = now() + 1800.0;
             }
@@ -433,6 +459,9 @@ pub fn start() -> Result<(), JsValue> {
     let resize = Closure::<dyn FnMut(Event)>::new(|_: Event| {
         APP.with(|state| {
             let mut app = state.borrow_mut();
+            app.layout_shell();
+            app.cache_overlay_layers();
+            app.sheet_drag = None;
             app.sync_dock();
             app.fit_cover();
             app.unmount_morph();
@@ -524,6 +553,9 @@ pub fn update(input: &str) {
 pub fn system_back() -> bool {
     APP.with(|state| {
         let mut app = state.borrow_mut();
+        if app.overlay_closing {
+            return true;
+        }
         if b(&app.data, "qrOpen") {
             post(json!({"type":"dismiss_login"}));
             return true;
@@ -538,6 +570,8 @@ pub fn system_back() -> bool {
             return true;
         }
         if s(&app.data, "page") != "home" {
+            app.route_direction = -1.0;
+            app.save_scroll();
             post(json!({"type":"back"}));
             return true;
         }
@@ -546,6 +580,127 @@ pub fn system_back() -> bool {
 }
 
 impl App {
+    fn layout_shell(&mut self) {
+        let (w, h) = viewport();
+        let wide = shell::wide(w, h);
+        let safe = n(&self.data, "safeBottom").max(0) as f64;
+        if let Some(root) = el("app") {
+            let _ = root.set_attribute("data-wide", if wide { "true" } else { "false" });
+            let floating = customization::get(&self.data, "bar") == "floating";
+            let root_page = matches!(s(&self.data, "page"), "home" | "mine" | "settings");
+            let bottom = shell::floating_bottom(safe);
+            let clearance = if wide || !root_page {
+                92.0 + safe
+            } else if floating {
+                144.0 + bottom
+            } else {
+                156.0 + safe
+            };
+            style(&root, "--dock-clearance", &format!("{clearance}px"));
+            style(&root, "--floating-bottom", &format!("{bottom}px"));
+            let count = self.dock_count.max(1);
+            style(
+                &root,
+                "--floating-width",
+                &format!("{}px", 24 + count * 48 + count.saturating_sub(1) * 12),
+            );
+        }
+        self.header_layers = (|| {
+            Some(HeaderLayers {
+                header: el("header")?,
+                large: find("#header .large-title")?,
+                compact: find("#header .compact-title")?,
+            })
+        })();
+        self.content_layer = el("content");
+        self.paint_header_scroll();
+    }
+    fn paint_header_scroll(&self) {
+        let Some(layers) = self.header_layers.as_ref() else {
+            return;
+        };
+        let (w, h) = viewport();
+        let collapse = if !shell::settings(s(&self.data, "page")) {
+            0.0
+        } else if shell::wide(w, h) {
+            1.0
+        } else {
+            shell::collapse(
+                self.content_layer
+                    .as_ref()
+                    .map(|e| e.scroll_top() as f64)
+                    .unwrap_or(0.0),
+            )
+        };
+        style(&layers.header, "--collapse", &format!("{collapse:.4}"));
+        style(&layers.large, "opacity", &(1.0 - collapse).to_string());
+        style(
+            &layers.large,
+            "transform",
+            &format!("translateY({}px)", -collapse * 12.0),
+        );
+        style(&layers.compact, "opacity", &collapse.to_string());
+    }
+    fn cache_overlay_layers(&mut self) {
+        self.overlay_layers = (|| {
+            let sheet = el("sheet")?;
+            Some(OverlayLayers {
+                height: rect(&sheet)[3],
+                sheet,
+                backdrop: find(".modal-backdrop")?,
+            })
+        })();
+    }
+    fn apply_overlay(&self) {
+        if let Some(layers) = self.overlay_layers.as_ref() {
+            let p = self.overlay_spring.position.clamp(0.0, 1.0);
+            style(
+                &layers.sheet,
+                "transform",
+                &format!("translate3d(0,{:.3}px,0)", layers.height * (1.0 - p)),
+            );
+            style(&layers.backdrop, "opacity", &p.to_string());
+        }
+    }
+    fn advance_shell(&mut self, dt: f64) {
+        if !self.route_spring.settled() {
+            if self.reduced {
+                self.route_spring.place(0.0);
+            } else {
+                self.route_spring.sample(
+                    dt,
+                    motion::Feel {
+                        stiffness: 26.0,
+                        damping: 1.0,
+                    },
+                );
+            }
+            if let Some(content) = self.content_layer.as_ref() {
+                let p = self.route_spring.position.clamp(0.0, 1.0);
+                style(
+                    content,
+                    "transform",
+                    &format!("translate3d({}px,0,0)", 24.0 * self.route_direction * p),
+                );
+                style(content, "opacity", &(1.0 - p * 0.35).to_string());
+            }
+        }
+        if self.sheet_drag.is_none() && !self.overlay_spring.settled() {
+            if self.reduced {
+                self.overlay_spring.place(self.overlay_spring.target);
+            } else {
+                self.overlay_spring.sample(dt, motion::Feel::REVEAL);
+            }
+            self.apply_overlay();
+        }
+        if self.overlay_closing && self.overlay_spring.settled() {
+            set_html("overlays", "");
+            self.painted_overlay = None;
+            self.overlay_layers = None;
+            self.overlay_open = false;
+            self.overlay_closing = false;
+        }
+    }
     fn save_scroll(&mut self) {
         if let Some(main) = el("content").and_then(|e| e.dyn_into::<HtmlElement>().ok()) {
             self.scrolls.insert(self.route_key(), main.scroll_top());
@@ -567,8 +722,26 @@ impl App {
     }
     fn act(&mut self, action: &str) {
         if action.starts_with("navigate:") {
+            if &action[9..] == s(&self.data, "page") {
+                return;
+            }
+            self.route_direction = if matches!(&action[9..], "home" | "mine" | "settings") {
+                0.0
+            } else {
+                1.0
+            };
             self.save_scroll();
             post(json!({"type":"navigate","page":&action[9..]}));
+            return;
+        }
+        if let Some(key) = action.strip_prefix("link:") {
+            if let Some(url) = shell::project_link(key) {
+                post(json!({"type":"open_external","url":url}));
+            }
+            return;
+        }
+        if action == "copy-project" {
+            post(json!({"type":"copy_project"}));
             return;
         }
         if let Some(source) = action.strip_prefix("open:") {
@@ -701,6 +874,8 @@ impl App {
         }
         match action {
             "back" => {
+                self.route_direction = -1.0;
+                self.save_scroll();
                 post(json!({"type":"back"}));
             }
             "open_player" => self.open_player(),
@@ -866,11 +1041,9 @@ impl App {
             );
             set_html("navigation", &render::navigation(&presentation));
             if route_changed {
-                if let Some(main) = el("content") {
-                    class(&main, "route-enter", false);
-                    let _ = main.get_bounding_client_rect();
-                    class(&main, "route-enter", true);
-                }
+                self.route_spring
+                    .place(if self.reduced { 0.0 } else { 1.0 });
+                self.route_spring.to(0.0);
             }
             if let Some(dock) = el("dock") {
                 class(&dock, "no-nav", !b(&presentation, "root"));
@@ -884,11 +1057,6 @@ impl App {
                 .as_array()
                 .map(|items| items.len())
                 .unwrap_or(0);
-            if let Some(main) = el("content").and_then(|e| e.dyn_into::<HtmlElement>().ok()) {
-                let _ = main.style().set_property("scroll-behavior", "auto");
-                main.set_scroll_top(*self.scrolls.get(&self.route_key()).unwrap_or(&0));
-                let _ = main.style().remove_property("scroll-behavior");
-            }
         }
         if let Some(root) = el("app") {
             for spec in customization::OPTIONS {
@@ -923,6 +1091,18 @@ impl App {
                 "primary",
                 "on-primary",
                 "border",
+                "card-fg",
+                "section-fg",
+                "divider",
+                "secondary",
+                "on-secondary",
+                "disabled",
+                "error",
+                "window-dimming",
+                "disabled-primary",
+                "disabled-secondary",
+                "disabled-on-primary",
+                "disabled-on-secondary",
             ] {
                 if let Some(color) = self.data["colors"][key].as_str() {
                     style(&root, &format!("--{key}"), color);
@@ -941,6 +1121,14 @@ impl App {
             class(&root, "reduced-motion", self.reduced);
             let _ = root.set_attribute("data-route", s(&self.data, "page"));
             let _ = root.set_attribute(
+                "data-settings-shell",
+                if shell::settings(s(&self.data, "page")) {
+                    "true"
+                } else {
+                    "false"
+                },
+            );
+            let _ = root.set_attribute(
                 "data-monet",
                 if b(&self.data, "monet") {
                     "true"
@@ -949,7 +1137,15 @@ impl App {
                 },
             );
         }
+        self.layout_shell();
         self.sync_dock();
+        if let Some(main) = el("content").and_then(|e| e.dyn_into::<HtmlElement>().ok()) {
+            let restore = *self.scrolls.get(&self.route_key()).unwrap_or(&0);
+            let options = web_sys::ScrollToOptions::new();
+            options.set_top(restore as f64);
+            options.set_behavior(web_sys::ScrollBehavior::Auto);
+            main.scroll_to_with_scroll_to_options(&options);
+        }
         self.paint_mini();
         self.paint_progress();
         self.scrolled();
@@ -1151,40 +1347,13 @@ impl App {
                 })
                 .unwrap_or_default();
             self.nav_element = Some(nav.clone());
-            let inset = match customization::get(&self.data, "bar") {
-                "floating" => 4.0,
-                "normal" => 10.0,
-                _ => 8.0,
-            };
-            let width = nav
-                .dyn_ref::<HtmlElement>()
-                .map(|n| n.client_width() as f64)
-                .unwrap_or(0.0);
-            style(
-                &nav,
-                "--nav-slot",
-                &format!(
-                    "{}px",
-                    ((width - 2.0 * inset) / self.dock_count.max(1) as f64).max(0.0)
-                ),
-            );
         }
         self.paint_dock();
     }
     fn paint_dock(&mut self) {
         if let Some(nav) = self.nav_element.as_ref() {
-            self.written_dock = self.dock.position;
             style(&nav, "--nav-index", &format!("{:.5}", self.dock.position));
             style(&nav, "--nav-count", &format!("{}", self.dock_count.max(1)));
-            // The pill squashes slightly while travelling so the spring's overshoot
-            // reads as weight rather than a bounce past the slot.
-            let wobble = (self.dock.position - self.dock.position.round()).abs();
-            style(&nav, "--nav-wobble", &format!("{wobble:.4}"));
-            style(
-                &nav,
-                "--nav-press",
-                &format!("{:.4}", self.nav_press.position),
-            );
         }
         for (index, item) in self.nav_nodes.iter().enumerate() {
             let distance = (index as f64 - self.dock.position).abs();
@@ -1193,23 +1362,15 @@ impl App {
         }
     }
     fn advance_dock(&mut self, dt: f64) {
-        if self.dock.settled() && self.nav_press.settled() {
+        if self.dock.settled() {
             return;
         }
         if self.reduced {
             self.dock.place(self.dock.target);
-            self.nav_press.place(self.nav_press.target);
-            self.paint_dock();
-            return;
+        } else {
+            self.dock.sample(dt, motion::Feel::DOCK);
         }
-        let position = self.dock.sample(dt, motion::Feel::DOCK);
-        self.nav_press.sample(dt, motion::Feel::REVEAL);
-        if (position - self.written_dock).abs() > 0.0002
-            || !self.nav_press.settled()
-            || self.nav_press.position == 0.0
-        {
-            self.paint_dock();
-        }
+        self.paint_dock();
     }
     fn advance_mini(&mut self, time: f64, dt: f64) {
         if self.player || !self.sheet_spring.settled() {
@@ -1521,13 +1682,47 @@ impl App {
     fn paint_overlay(&mut self) {
         let open = b(&self.data, "qrOpen") || !self.sheet.is_empty();
         let entering = open && !self.overlay_open;
-        self.overlay_open = open;
+        if !open {
+            if self.overlay_open {
+                if let Some(layers) = self.overlay_layers.as_ref() {
+                    let _ = layers.sheet.set_attribute("inert", "");
+                }
+                self.overlay_closing = true;
+                self.sheet_drag = None;
+                self.overlay_spring.to(0.0);
+                if self.reduced {
+                    self.overlay_spring.place(0.0);
+                    self.advance_shell(0.0);
+                }
+            }
+            return;
+        }
+        self.overlay_open = true;
+        if let Some(layers) = self.overlay_layers.as_ref() {
+            let _ = layers.sheet.remove_attribute("inert");
+        }
+        self.overlay_closing = false;
+        self.overlay_spring.to(1.0);
+        if entering {
+            self.overlay_spring
+                .place(if self.reduced { 1.0 } else { 0.0 });
+        }
         let next = render::overlay(
             &self.sheet,
             &self.data,
             &self.live,
             !self.sheet_stack.is_empty(),
         );
+        let geometry_changed = entering
+            || match (&self.painted_overlay, &next) {
+                (Some(a), Some(b)) => {
+                    a.class != b.class
+                        || a.header != b.header
+                        || a.items != b.items
+                        || a.message != b.message
+                }
+                _ => true,
+            };
         match (&self.painted_overlay, &next) {
             (Some(old), Some(new))
                 if old.class == new.class || old.class != "qr-sheet" && new.class != "qr-sheet" =>
@@ -1555,11 +1750,15 @@ impl App {
                     }
                 }
             }
-            (_, Some(new)) => set_html("overlays", &new.markup(entering)),
+            (_, Some(new)) => set_html("overlays", &new.markup(false)),
             (Some(_), None) => set_html("overlays", ""),
             (None, None) => {}
         }
         self.painted_overlay = next;
+        if geometry_changed {
+            self.cache_overlay_layers();
+        }
+        self.apply_overlay();
     }
     fn paint_progress(&self) {
         let duration = n(&self.live, "duration").max(0);
@@ -1700,6 +1899,7 @@ impl App {
         }
     }
     fn scrolled(&mut self) {
+        self.paint_header_scroll();
         if let Some(main) = el("content").and_then(|n| n.dyn_into::<HtmlElement>().ok()) {
             let page = s(&self.data, "page");
             let top = main.scroll_top();
@@ -1780,12 +1980,14 @@ impl App {
         self.advance_dock(dt);
         self.advance_mini(time, dt);
         self.advance_sheet(dt);
+        self.advance_shell(dt);
         let animating = !self.dock.settled()
             || !self.mini.settled()
             || !self.sheet_spring.settled()
             || self.morph.is_some()
-            || !self.nav_press.settled()
-            || self.nav_drag.is_some()
+            || !self.route_spring.settled()
+            || !self.overlay_spring.settled()
+            || self.sheet_drag.is_some()
             || (self.player && self.player_page == 2 && b(&self.live, "playing"));
         if animating != self.animation_vote {
             self.animation_vote = animating;

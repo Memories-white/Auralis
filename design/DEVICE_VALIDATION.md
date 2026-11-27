@@ -1,3 +1,13 @@
+# v0.5.6-preview Miuix 设置与交互（2026-11-27）
+
+- Rust UI30、核心42、Java4组通过；完整WASM/NDK/Gradle构建和APK v2签名通过，code33，沿用原debug证书。本地包哈希和源码基线见docs/HANDOFF.md，未创建Release。
+- 核对Miuix 0.9.5-beta01固定源码：普通导航64/26/12、悬浮52/28、Card16、SmallTitle28/8、Switch49×28和20滑块；普通导航删除旧移动胶囊/图标交叉淡入。Kotlin/Compose页面未加入，布局和动效仍是Rust。
+- 真实WASM验证：关于唯一入口、5份本地许可、外链/复制事件、设置首次进入scrollTop0、标题收起至safeTop+56、返回恢复位置、面板下拖并等待退出后卸载；原登录、700首分页、共享封面、触屏切页、歌词、音效和缓存回归通过。
+- 修复中定位到两种滚动竞争：底栏空间未完成时恢复导致截断、旧全局smooth动画继续推动新页面。现在主滚动容器关闭自动锚定和全局smooth；显式返回顶部/定位仍保留Smooth。
+- 视觉复核在本地忽略目录：settings-overview-dark.png、settings-dark.png、about-dark.png、wide-dark.png。均为测试数据；设计令牌lint 0错误0警告。设备仍未连接验证，本轮没有安装、真实外链/剪贴板或手机GPU帧率结论。
+
+---
+
 # v0.5.5-preview 播放器控制与逐字空间动效（2026-11-27）
 
 - 完整Rust/WASM、NDK和Android构建通过，code32。APK v2签名通过，与0.5.4证书一致；哈希和交接表在docs/HANDOFF.md。本次源码推送main，不创建Release。

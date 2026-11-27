@@ -6,17 +6,46 @@
 
 | 项目 | 状态 / 入口 |
 | :-- | :-- |
-| 日期、版本 | 2026-11-27 · `0.5.5-preview` · versionCode `32` |
-| 基线 | `05e759dccbd5284906e69b4c3568951bc8225c3b` · 已推送的0.5.4底栏/独立转场版 |
+| 日期、版本 | 2026-11-27 · `0.5.6-preview` · versionCode `33` |
+| 基线 | `c8985590659a56213e716c7ecede55d94c03695e` · 已推送的0.5.5播放器与音效版 |
 | 当前提交 | 本文与本次实现同一个提交；使用 `git log -1` 获取完整 SHA，避免文档自引用哈希 |
-| 最新本地包 | `APKs/Auralis-v0.5.5-preview.apk` |
-| APK SHA256 | `9D80E2A39CE2D57F89C6BEB397AC30132C42FBAC8253AFAAB41DEC9406E5BC1E` |
-| 包体 | 16359062 字节；`apksigner verify` v2通过；debug签名证书与0.5.4一致 |
+| 最新本地包 | `APKs/Auralis-v0.5.6-preview.apk` |
+| APK SHA256 | FFAAE5D135535F14C3B1CB962FC954E42DC8A9EF5A92B669A31934F57A1BE531 |
+| 包体 | 17497958 字节；`apksigner verify` v2通过；debug证书继续保持一致 |
 | 仓库 | [Memories-white/Auralis](https://github.com/Memories-white/Auralis) · public |
 | 已发布版本 | GitHub Release 与主分支分开管理；本次不自动创建 Release |
 | 当前界面架构 | Rust/WASM + Android WebView；不要恢复 Kotlin 页面或增加 JS 动画控制器 |
 
 ## 本次改动交接表
+
+| 问题 / 需求 | 实现与入口 | 验证 / 边界 / 下一步 |
+| :-- | :-- | :-- |
+| 关于重复、设置层级混乱 | `ui/src/presentation.rs::settings/customization_page`：去掉顶部关于卡，只留“关于 Auralis”一行；设置首页按个性化/播放/应用/账号分组；主题配色与界面合并到“主题与外观”，莫奈选项归入主题颜色 | Rust断言关于入口恰好1个、没有settings-intro；音质/音效/定时/缓存/退出继续可用；退出位于最后；原参数保留 |
+| 关于页重新设计 | `render.rs::slot(about_identity/licenses)`：使用现有A+播放符号、名称/版本/一句简介、项目/版本/反馈链接、5份本地许可、复制地址；`shell.rs::project_link`和RustWebView原生外链/剪贴板桥接 | 真实WASM验证唯一身份区、5个许可文档、项目URL和复制事件；原生只允许本项目3个GitHub地址，有浏览器失败提示。实机浏览器/剪贴板尚未验证；许可文本是静态打包，不发起网络获取 |
+| 底栏不是Miuix | 依据beta01的NavigationBar.kt：普通64px、图标26、文字12、选中加粗，同色内容按选中/未选/按压透明度区分；删除移动胶囊、描边/填充交叉淡入和拖动选页。悬浮栏52高、28图标、48触控项、12内间距，3项宽192 | WASM断言普通64/26/700字重、aria-selected、按钮无系统默认底色、没有nav-pill；尺寸探针检查标准/悬浮几何。旧glass值经schema读取映射normal，其余个人设置不重置 |
+| 规范间距与控件状态 | `style.css`：设置卡片16圆角，外侧12/底部12，小标题28/8，偏好正文17/摘要14，去掉彩色前导底块与默认逐行分隔线；Switch按49×28、20滑块、4→25偏移映射；原生语义禁用色桥接，布尔/单选的语义放在操作按钮上 | 依据Miuix beta01 Card/SmallTitle/NavigationBar/Switch声明与Defaults核对；编译和浏览器图像验证分开。MiSans优先，缺少时回退系统/Noto；没有下载或嵌入字体 |
+| 顶栏与适配不统一 | `shell.rs`统一宽屏策略：宽≥840或宽≥600且高宽比<1.2；`layout_shell/paint_header_scroll`以同一个主滚动容器驱动大标题收起，宽屏固定紧凑标题；一次性交接状态栏/底栏空间 | 首次设置进入scrollTop=0；滚动后header=80（safeTop24+56）；返回保存的位置误差<3px；窄/宽屏回归通过。CSS通过data-wide使用同一Rust判断，不保留700px分叉 |
+| 切页/返回和弹层不像Miuix | Rust `route_spring/advance_shell`驱动进入淡移；子设置页左边缘右滑复用现有back；`overlay_spring`驱动面板和遮罩，头部下拖未过阈值回弹，过阈值退出，保留DOM直到动画结束；退出期间inert并消费返回 | 浏览器检查实际拖动退出、关闭前节点仍连接、最终卸载；原添加歌单稳定弹窗及触屏切页继续通过。路由/返回仍由现有MusicState所有，不创建第二个栈；拖动区域为头部，不抢占列表/歌词竖向滚动 |
+| 次要文字和遮罩颜色失真 | `RustWebView.kt::RustApp`原ARGB→CSS转换丢弃alpha，本轮改为RRGGBBAA；增加card-fg/section-fg/divider/secondary/disabled/error/window-dimming等原生语义色角色 | 编译验证实际Miuix 0.9.5-beta01属性；全局主题仍由原有MiuixTheme提供，未新增Kotlin页面。没有用手工浅/深调色板替换原生取色 |
+| 首屏被上一页滚动推走 | `paint_content`先应用壳层空间再恢复滚动；移除主容器全局smooth和自动锚定，显式Auto恢复会取消上一页未结束的平滑滚动；返回顶部/定位仍使用原来的显式Smooth | 先前700首歌单滚到底再首次打开设置，等待450ms仍在顶部；进入子页后返回恢复位置。调试用滚动探针已删除 |
+| 交付 | 0.5.6/code33，本地包见上表；完整构建及原证书v2签名；交付推送main，不自动创建Release | 用户要求后续USB连接再通知；本轮未安装或测量手机实际GPU帧率。源码、APK、安装和Release状态分开记录 |
+
+## 0.5.6 依据、偏离与验证
+
+| 类型 | 结果 / 说明 |
+| :-- | :-- |
+| Miuix依据 | 固定 `v0.9.5-beta01` / `6d2554a850b8960e2616c968263ff64beb5ffb03`；已读NavigationBar.kt、Switch.kt、Card.kt、Scaffold.kt及组件契约。Gradle现有依赖正是0.9.5-beta01，没有升级依赖 |
+| Melox依据 | 固定 `bfe7c5dc467b84d7a9df8e63c93208a3e6f61672` 的SettingsScreen.kt / AboutScreen.kt；参考分组、单一关于入口与导航关系，未复制GPL界面源码 |
+| 目标边界 | 用户要求界面及交互使用Rust，因此保留Rust/WASM+WebView映射，不调用Compose布局组件；SVG语义图标沿用项目矢量。CSS corner-shape可用时用squircle，否则16px圆角回退；WebView背景模糊不等同于原生材质/液态折射。不声称已经原生组件API/runtime一致 |
+| 状态所有权 | 路由和后退仍由既有MusicState持有；Rust控制布局、手势、动画和参数schema；原生层只承接主题/窗口/媒体/外链/剪贴板。没有另建Navigator/账号/播放状态 |
+| 单元/策略 | Rust UI30、core42、Java4组通过；新增关于唯一性、许可路由、旧glass回退、壳层尺寸/宽屏阈值和固定外链策略 |
+| 真实WASM | tools/check-rust-ui.cjs：首次进入顶部、返回滚动恢复、标题折叠、唯一关于、许可展开、外链/复制事件、面板拖动与延迟卸载；原二维码/700首分页/共享封面/逐字动效/音效/缓存回归通过 |
+| 几何/性能探针 | tools/check-player-motion.cjs miuix：标准mini68/nav64，悬浮mini68/nav52/宽192；封面页仍0词行DOM且无全屏clip-path。浏览器单次回调/CPU不能作为手机FPS结论 |
+| 视觉证据 | 本地忽略目录device-debug/rust-ui/browser/settings-overview-dark.png、settings-dark.png、about-dark.png与wide-dark.png。全部为测试数据，未上传个人截图 |
+| 设计令牌 | lint_tokens.py --style miuix通过；此静态检查不能替代原生控件运行验证或覆盖所有实际动态调色板对比度 |
+| 下一步实机 | 保留数据安装后核对新主题透明度、明暗/莫奈、标准/悬浮底栏、设置返回位置、面板快速开关与下拉、系统返回/侧滑冲突、外链和复制；实测呈现帧率后再评价性能 |
+
+## 0.5.5 历史改动交接表
 
 | 问题 / 需求 | 实现与入口 | 验证 / 边界 / 下一步 |
 | :-- | :-- | :-- |

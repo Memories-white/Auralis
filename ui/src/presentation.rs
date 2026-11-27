@@ -403,10 +403,15 @@ fn dependent(mut node: Value, enabled: bool) -> Value {
 }
 
 fn option_card(page: &str, key: &str, v: &Value) -> Vec<Value> {
-    let title = crate::customization::spec(key).map(|s| s.title).unwrap_or(key);
+    let title = crate::customization::spec(key)
+        .map(|s| s.title)
+        .unwrap_or(key);
     vec![
         json!({"kind":"section","text":value_json(title)}),
-        group(&format!("{page}-{key}"), crate::customization::radios(v, key)),
+        group(
+            &format!("{page}-{key}"),
+            crate::customization::radios(v, key),
+        ),
     ]
 }
 fn options_page(page: &str, keys: &[&str], v: &Value) -> Vec<Value> {
@@ -414,7 +419,9 @@ fn options_page(page: &str, keys: &[&str], v: &Value) -> Vec<Value> {
     for key in keys {
         nodes.extend(option_card(page, key, v));
     }
-    nodes.push(note("改动即时生效并自动保存。系统关闭动画时优先遵循系统设置。"));
+    nodes.push(note(
+        "改动即时生效并自动保存。系统关闭动画时优先遵循系统设置。",
+    ));
     nodes
 }
 /// Hub page: one group of rows that opens a dedicated preference page, mirroring
@@ -432,11 +439,13 @@ fn customization_hub(
     ];
     if let Some(current) = crate::customization::spec("bar") {
         // The hub keeps a compact preview of the two most visible choices.
-        nodes.push(json!({"kind":"text","style":"settings-note","text":value_json(&format!(
-            "底栏：{} · 封面：{}",
-            crate::customization::title(v, "bar"),
-            crate::customization::title(v, "shape")
-        ))}));
+        nodes.push(
+            json!({"kind":"text","style":"settings-note","text":value_json(&format!(
+                "底栏：{} · 封面：{}",
+                crate::customization::title(v, "bar"),
+                crate::customization::title(v, "shape")
+            ))}),
+        );
         let _ = current;
     }
     nodes.push(note(summary));
@@ -468,9 +477,16 @@ fn customization_page(page: &str, v: &Value) -> Vec<Value> {
         ),
         "ui-customize" => customization_hub(
             page,
-            "界面外观",
-            "所有选项随 Rust 状态即时生效并自动保存，不会清除账号、歌曲或播放进度。",
+            "主题与外观",
+            "选择适合自己的配色、布局与显示效果。",
             vec![
+                nav_row(
+                    "主题颜色",
+                    "明暗模式与莫奈取色",
+                    "navigate:appearance",
+                    "palette",
+                    tr(appearance(string(v, "colorMode"))),
+                ),
                 nav_row(
                     "底栏与材质",
                     "底栏样式、紧凑歌曲栏、模糊与文字",
@@ -530,52 +546,23 @@ fn settings(page: &str, v: &Value) -> Vec<Value> {
         | "lyric-type" | "lyric-effect" => customization_page(page, v),
         "settings" => {
             let mut nodes = vec![
-                card(
-                    "settings-intro",
-                    vec![row(vec![
-                        icon("music"),
-                        column(vec![
-                            text(value("Auralis"), "heading"),
-                            text(tr("about_summary"), "summary"),
-                        ]),
-                    ])],
-                    "navigate:about",
-                ),
-                section("appearance-title", "appearance_group", ""),
+                section("personalization-title", "personalization_group", ""),
                 group(
-                    "appearance",
+                    "personalization",
                     vec![
-                        pref_full(
-                            "appearance",
-                            tr("appearance_summary"),
-                            "navigate:appearance",
-                            "palette",
-                            tr(appearance(string(v, "colorMode"))),
-                        ),
                         nav_row(
-                            "主题与界面",
-                            "底栏、播放页、列表与动效",
+                            "主题与外观",
+                            "配色、底栏、播放页与动效",
                             "navigate:ui-customize",
                             "dock",
                             Value::Null,
                         ),
                         nav_row(
                             "歌词外观",
-                            "排版、模糊、翻译与播放控件",
+                            "排版、逐字动效与翻译",
                             "navigate:lyrics-style",
                             "lyrics",
                             Value::Null,
-                        ),
-                        monet_switch(v),
-                        dependent(
-                            pref_full(
-                                "monet_options",
-                                tr("monet_summary"),
-                                "navigate:monet",
-                                "palette",
-                                tr(source(string(v, "monetSource"))),
-                            ),
-                            monet,
                         ),
                     ],
                 ),
@@ -585,18 +572,19 @@ fn settings(page: &str, v: &Value) -> Vec<Value> {
                     vec![
                         pref_full(
                             "audio_quality",
-                            tr("quality_summary"),
+                            Value::Null,
                             "navigate:quality",
-                            "volume",
+                            "quality",
                             quality_title(v),
                         ),
                         pref_full(
-                            "sleep_timer",
-                            tr("sleep_off_summary"),
-                            "sleep",
-                            "timer",
+                            "audio_effects",
+                            Value::Null,
+                            "audio-effects",
+                            "equalizer",
                             Value::Null,
                         ),
+                        pref_full("sleep_timer", Value::Null, "sleep", "timer", Value::Null),
                     ],
                 ),
                 section("app-title", "application_group", ""),
@@ -611,8 +599,8 @@ fn settings(page: &str, v: &Value) -> Vec<Value> {
                             Value::Null,
                         ),
                         pref_full(
-                            "about",
-                            tr("about"),
+                            "about_auralis",
+                            Value::Null,
                             "navigate:about",
                             "info",
                             value(string(v, "version")),
@@ -623,10 +611,10 @@ fn settings(page: &str, v: &Value) -> Vec<Value> {
             if yes(v, "loggedIn") {
                 nodes.push(section("account-title", "account_group", ""));
                 nodes.push(group(
-                    "logout",
+                    "account",
                     vec![pref_full(
                         "logout",
-                        tr("logout_summary"),
+                        Value::Null,
                         "logout",
                         "logout",
                         Value::Null,
@@ -655,6 +643,23 @@ fn settings(page: &str, v: &Value) -> Vec<Value> {
                         )
                     })
                     .collect(),
+            ),
+            section("colors-title", "monet_title", ""),
+            group(
+                "appearance-colors",
+                vec![
+                    monet_switch(v),
+                    dependent(
+                        pref_full(
+                            "monet_options",
+                            tr("monet_summary"),
+                            "navigate:monet",
+                            "palette",
+                            tr(source(string(v, "monetSource"))),
+                        ),
+                        monet,
+                    ),
+                ],
             ),
         ],
         "quality" => vec![
@@ -801,16 +806,51 @@ fn settings(page: &str, v: &Value) -> Vec<Value> {
             section("title", "image_cache", ""),
             group("cache", vec![json!({"kind":"platform","slot":"cache"})]),
         ],
-        _ => vec![card(
-            "about",
-            vec![
-                icon("music"),
-                text(value("Auralis"), "hero"),
-                text(value(string(v, "version")), "summary"),
-                text(tr("about_summary"), "body"),
-            ],
-            "",
-        )],
+        "about" => vec![
+            json!({"kind":"platform","slot":"about_identity"}),
+            group(
+                "about-project",
+                vec![
+                    pref_full(
+                        "project_home",
+                        Value::Null,
+                        "link:project",
+                        "info",
+                        Value::Null,
+                    ),
+                    pref_full(
+                        "version_history",
+                        Value::Null,
+                        "link:releases",
+                        "refresh",
+                        Value::Null,
+                    ),
+                    pref_full("feedback", Value::Null, "link:issues", "text", Value::Null),
+                ],
+            ),
+            group(
+                "about-license",
+                vec![
+                    pref_full(
+                        "open_source_licenses",
+                        Value::Null,
+                        "navigate:licenses",
+                        "library",
+                        Value::Null,
+                    ),
+                    pref_full(
+                        "copy_project_address",
+                        Value::Null,
+                        "copy-project",
+                        "share",
+                        Value::Null,
+                    ),
+                ],
+            ),
+            note(&crate::labels::label("about_footer")),
+        ],
+        "licenses" => vec![json!({"kind":"platform","slot":"licenses"})],
+        _ => vec![],
     }
 }
 pub fn screen(v: &Value) -> Result<Value, String> {
@@ -822,8 +862,8 @@ pub fn screen(v: &Value) -> Result<Value, String> {
         "songs" => (value(string(v, "detailTitle")), detail(v)),
         "recent" => (tr("recent_plays"), recent(v)),
         "settings" | "appearance" | "quality" | "monet" | "monet-source" | "monet-style"
-        | "monet-spec" | "storage" | "about" | "ui-customize" | "lyrics-style" | "ui-dock"
-        | "ui-player" | "ui-list" | "ui-motion" | "lyric-type" | "lyric-effect" => {
+        | "monet-spec" | "storage" | "about" | "licenses" | "ui-customize" | "lyrics-style"
+        | "ui-dock" | "ui-player" | "ui-list" | "ui-motion" | "lyric-type" | "lyric-effect" => {
             let title = match page {
                 "monet" => "monet_title",
                 "monet-source" => "color_source",
@@ -884,8 +924,21 @@ mod tests {
         let guest = screen(&json!({"page":"settings"})).unwrap().to_string();
         assert!(!guest.contains("\"action\":\"logout\""));
         let doc = screen(&json!({"page":"settings","loggedIn":true,"monet":false})).unwrap();
-        assert_eq!(doc["nodes"][2]["children"][4]["enabled"], false);
+        let appearance = screen(&json!({"page":"appearance","monet":false})).unwrap();
+        assert_eq!(appearance["nodes"][3]["children"][1]["enabled"], false);
         assert!(doc.to_string().contains("\"action\":\"logout\""));
+    }
+    #[test]
+    fn settings_have_one_about_entry_and_license_destination() {
+        let settings = screen(&json!({"page":"settings","version":"0.5.6"}))
+            .unwrap()
+            .to_string();
+        assert_eq!(settings.matches("navigate:about").count(), 1);
+        assert!(!settings.contains("settings-intro"));
+        let about = screen(&json!({"page":"about"})).unwrap().to_string();
+        assert_eq!(about.matches("about_identity").count(), 1);
+        assert!(about.contains("navigate:licenses"));
+        assert!(screen(&json!({"page":"licenses"})).is_ok());
     }
     #[test]
     fn clearing_query_returns_discovery_without_stale_search_results() {
@@ -909,14 +962,17 @@ mod tests {
             "navigate:ui-list",
             "navigate:ui-motion",
         ] {
-            assert!(hub.contains(action), "{action} missing from the interface hub");
+            assert!(
+                hub.contains(action),
+                "{action} missing from the interface hub"
+            );
         }
         let lyrics = screen(&json!({"page":"lyrics-style"})).unwrap().to_string();
         assert!(lyrics.contains("navigate:lyric-type"));
         assert!(lyrics.contains("navigate:lyric-effect"));
         let dock = screen(&json!({"page":"ui-dock","uiPreferences":{"bar":"floating"}})).unwrap();
         let text = dock.to_string();
-        assert_eq!(text.matches("\"action\":\"ui:bar:").count(), 3);
+        assert_eq!(text.matches("\"action\":\"ui:bar:").count(), 2);
         assert!(text.contains("ui:bar:floating"));
         // One selected value per option group on this page.
         assert_eq!(text.matches("\"selected\":true").count(), 4);

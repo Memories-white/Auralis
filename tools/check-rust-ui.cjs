@@ -18,7 +18,7 @@ const data = {
   search: [], playlists, recommendations: playlists, queue: rows.slice(0, 8), history: ['周末', '慢慢听'], artists: ['Auralis Studio', '音乐时光'],
   detailTitle: '晚风里的旋律', detailCover: playlists[1].cover, detailLoading: false, detailError: '', query: '', searchedQuery: '', busy: false, status: '',
   discoveryLoading: false, discoveryMore: true, discoveryError: '', colorMode: 'light', monet: false, monetSource: 'wallpaper', monetStyle: 'TonalSpot', monetSpec: 'Spec2021', monetColor: '3482FF',
-  quality: 'auto', qualityFallback: true, version: '0.4.0-preview', qrOpen: false, lyrics: '[00:00.00]让旋律慢慢靠近\n[00:03.00]把今天交给音乐\n[00:06.00]下一句，落在心里\n[00:09.00]和你一起慢慢听\n[00:12.00]每一刻都有回响\n[00:15.00]走向更远的地方',
+  quality: 'auto', qualityFallback: true, version: '0.5.6-preview', qrOpen: false, lyrics: '[00:00.00]让旋律慢慢靠近\n[00:03.00]把今天交给音乐\n[00:06.00]下一句，落在心里\n[00:09.00]和你一起慢慢听\n[00:12.00]每一刻都有回响\n[00:15.00]走向更远的地方',
   translation: '', currentSong: rows[1], collectionBusy: false, collectionMessage: '', safeTop: 24, safeBottom: 16,
   colors: { bg: '#f6f6f6', card: '#ffffff', fg: '#191919', muted: '#797b80', primary: '#3482ff', 'on-primary': '#ffffff', border: '#e7e8eb' },
 };
@@ -102,7 +102,7 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     assert.ok(bounds.shelf >= 20, 'Shelf snaps away its leading gutter');
     await page.waitForTimeout(450); await page.screenshot({ path: path.join(output, 'home-light.png') });
 
-    // Dock indicator: the pill is Rust-sampled, so every reading must be a valid
+    // Navigation emphasis is Rust-sampled, so every reading must be a valid
     // intermediate slot position that ends exactly on the selected item.
     data.page = 'mine'; await content();
     const dockTrack = [];
@@ -113,29 +113,17 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     await page.waitForTimeout(600);
     const dockSettled = await page.evaluate(() => {
       const nav = document.querySelector('#navigation');
-      const pill = document.querySelector('.nav-pill').getBoundingClientRect();
       const item = document.querySelectorAll('#navigation .nav-item')[1].getBoundingClientRect();
-      return { index: parseFloat(getComputedStyle(nav).getPropertyValue('--nav-index')), dx: Math.abs(pill.x - item.x), dw: Math.abs(pill.width - item.width) };
+      return { index: parseFloat(getComputedStyle(nav).getPropertyValue('--nav-index')), height:nav.getBoundingClientRect().height,icon:document.querySelector('.nav-glyph svg').getBoundingClientRect().width,weight:getComputedStyle(document.querySelectorAll('.nav-item')[1]).fontWeight,selected:document.querySelectorAll('.nav-item')[1].getAttribute('aria-selected') };
     });
-    assert.ok(dockTrack.some(v => v > 0.02 && v < 1.98), `Dock indicator jumped instead of gliding: ${dockTrack.join(',')}`);
+    assert.ok(dockTrack.some(v => v > 0.02 && v < 0.98), `Dock indicator jumped instead of gliding: ${dockTrack.join(',')}`);
     assert.ok(dockTrack.every(v => v >= 0 && v < 1.045), 'Dock overshoot exceeded the spring tolerance: '+dockTrack);
     assert.ok(dockSettled.index > 0.999 && dockSettled.index < 1.001, `Dock indicator did not settle on slot 1: ${dockSettled.index}`);
-    assert.ok(Math.abs(dockSettled.dx-5)<2 && Math.abs(dockSettled.dw-10)<2, 'Glass indicator should overhang the selected slot by 5px per side: '+JSON.stringify(dockSettled));
+    assert.equal(await page.locator('.nav-item').first().evaluate(e=>getComputedStyle(e).backgroundColor),'rgba(0, 0, 0, 0)');assert.equal(dockSettled.height,64);assert.equal(dockSettled.icon,26);assert.equal(dockSettled.weight,'700');assert.equal(dockSettled.selected,'true');assert.equal(await page.locator('.nav-pill').count(),0);
     data.page = 'home'; await content(); await page.waitForTimeout(700);
 
     const dockGeometry = await page.evaluate(() => ({mini:document.querySelector('#mini-player').getBoundingClientRect().height, nav:document.querySelector('#navigation').getBoundingClientRect().height}));
-    assert.deepEqual(dockGeometry, {mini:52,nav:54});
-    // Real pointer travel moves the capsule before committing a route on release.
-    const navBox = await page.locator('#navigation').boundingBox();
-    const navPoint = slot => ({clientX:navBox.x+8+(navBox.width-16)/3*(slot+.5),clientY:navBox.y+27,pointerId:19,pointerType:'touch',bubbles:true});
-    await page.locator('#navigation').dispatchEvent('pointerdown',navPoint(0));
-    await page.locator('#navigation').dispatchEvent('pointermove',navPoint(.6));
-    const dragIndex=await page.locator('#navigation').evaluate(e=>Number(e.style.getPropertyValue('--nav-index')));
-    assert.ok(dragIndex>.55&&dragIndex<.65, 'Capsule must track the finger: '+dragIndex);
-    await page.locator('#navigation').dispatchEvent('pointerup',navPoint(.6));
-    assert.equal(await page.evaluate(()=>window.__actions.filter(a=>a.type==='navigate').at(-1).page),'mine');
-    data.page='mine'; await content(); data.page='home'; await content(); await page.waitForTimeout(700);
-
+    assert.deepEqual(dockGeometry, {mini:68,nav:64});
     // Cover morph: the shared element must interpolate the corner radius instead of
     // switching classes at the end, and the real cover only appears once it lands.
     await page.locator('#mini-player .mini-identity>span:not(.artwork)').click();
@@ -271,9 +259,25 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     assert.ok(await page.locator('[data-action=locate]').isVisible());
 
     data.page = 'settings'; data.colors = { bg: '#141414', card: '#232323', fg: '#f2f2f2', muted: '#96979b', primary: '#91b6ff', 'on-primary': '#182c4b', border: '#3d3e42' }; await content();
+    await page.waitForTimeout(450);assert.equal(await page.locator('#content').evaluate(e=>e.scrollTop),0,'First settings visit must start at the top');await page.screenshot({path:path.join(output,'settings-overview-dark.png')});
     assert.equal(await page.locator('[data-action=logout]').count(), 1);
-    assert.ok(await page.locator('[data-action="navigate:appearance"]').isVisible(), 'New settings page inherited playlist scroll');
-    assert.ok(await page.locator('[data-action="navigate:monet"]').isDisabled());
+    assert.ok(await page.locator('[data-action="navigate:ui-customize"]').isVisible(), 'New settings page inherited playlist scroll');
+    assert.equal(await page.locator('[data-action="navigate:about"]').count(),1,'Duplicate about entry');
+    await page.locator('#content').evaluate(e=>{e.scrollTop=e.scrollHeight;});await page.waitForTimeout(120);
+    const collapsed=await page.locator('#header').boundingBox();assert.ok(Math.abs(collapsed.height-80)<1,'Miuix settings title did not collapse');
+    await page.locator('[data-action="navigate:about"]').click();const settingsScroll=await page.locator('#content').evaluate(e=>e.scrollTop);
+    data.page='about';await content();await page.waitForTimeout(450);
+    assert.equal(await page.locator('.about-identity').count(),1);
+    await page.screenshot({path:path.join(output,'about-dark.png')});
+    await page.locator('[data-action="link:project"]').click();
+    assert.equal(await page.evaluate(()=>window.__actions.filter(a=>a.type==='open_external').at(-1).url),'https://github.com/Memories-white/Auralis');
+    await page.locator('[data-action="copy-project"]').click();assert.ok(await page.evaluate(()=>window.__actions.some(a=>a.type==='copy_project')));
+    await page.locator('[data-action="navigate:licenses"]').click();data.page='licenses';await content();await page.waitForTimeout(450);
+    assert.equal(await page.locator('.license-document').count(),5);await page.locator('.license-document summary').first().click();assert.ok(await page.locator('.license-document[open] pre').first().isVisible());
+    await page.locator('#header [data-action=back]').click();assert.ok(await page.evaluate(()=>window.__actions.some(a=>a.type==='back')));
+    data.page='settings';await content();await page.waitForTimeout(450);assert.ok(Math.abs(await page.locator('#content').evaluate(e=>e.scrollTop)-settingsScroll)<3,'Settings scroll was not retained');
+    data.page='appearance';await content();await page.waitForTimeout(450);assert.ok(await page.locator('[data-action="navigate:monet"]').isDisabled());
+    data.page='settings';await content();await page.waitForTimeout(450);
     await page.screenshot({ path: path.join(output, 'settings-dark.png') });
     data.page = 'ui-customize'; await content();
     assert.ok(await page.locator('[data-action="navigate:ui-dock"]').isVisible(), 'Interface hub lost the dock page');
@@ -361,7 +365,13 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     assert.ok(await addToPlaylist.isDisabled(), 'The chooser must prevent repeat submissions while saving');
     Object.assign(data, {collectionBusy: false, collectionMessage: ''});
     await content();
-    await page.locator('.sheet [data-action=close_sheet]').click(); await page.locator('[data-action=close_player]').click();
+    const closingSheet=await page.locator('#sheet').elementHandle();const handle=page.locator('.sheet-handle');const handleBox=await handle.boundingBox();
+    await handle.dispatchEvent('pointerdown',{clientX:handleBox.x+10,clientY:handleBox.y+2,bubbles:true});
+    await handle.dispatchEvent('pointermove',{clientX:handleBox.x+10,clientY:handleBox.y+270,bubbles:true});
+    await handle.dispatchEvent('pointerup',{clientX:handleBox.x+10,clientY:handleBox.y+270,bubbles:true});
+    assert.ok(await closingSheet.evaluate(e=>e.isConnected),'Sheet unmounted before the exit animation');
+    await page.waitForTimeout(650);assert.equal(await page.locator('#sheet').count(),0,'Drag did not dismiss the sheet');
+    await page.locator('[data-action=close_player]').click();
     await page.waitForTimeout(750);
     await page.setViewportSize({ width: 360, height: 800 });
     data.page = 'ui-customize'; await content();
@@ -434,7 +444,7 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     assert.equal(await page.locator('.karaoke-word').count(),0,'Line-only lyrics acquired fabricated word timing');
     assert.ok([...artworkRequests.values()].every(n => n === 1), 'A cached artwork was requested more than once');
     assert.equal(errors.length, 0, errors.join('\n'));
-    console.log('PASS: real Rust/WASM boot, safe layout, shelf gutter, one daily entry, continuous dock indicator, continuous cover morph with matching corner radius, player expansion, native touch swipes through information, cover and lyrics, exact active line, manual-follow recovery, spring mini collapse, search/IME focus, playlist filters/loading/retry, top/locate, settings hub/sub-pages with native round-trip, grouped song menu, audio controls, glyph lift/swell, neutral timeline and wide layout.');
-    fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ result: 'passed', engine: 'real Rust/WASM; mock native service bridge', audio:{speedMessage:true,fadeMessage:true,narrow:true},karaoke:{glyphLift:true,glyphScale:true,wordFill:true,pause:true,seek:true,betweenPulses:true,lineFallback:true}, artwork: { unique: artworkRequests.size, maximumRequestsPerArtwork: Math.max(...artworkRequests.values()), decodedNodeRetained: true, pageAndPlayerReuse: true }, dock: dockSettled, cover: { frames: morph.filter(f => f.active).length, landed: landed.radius, handedOver: !landed.overlay }, focal, bounds, screenshots: fs.readdirSync(output).filter(n => n.endsWith('.png')) }, null, 2));
+    console.log('PASS: real Rust/WASM boot, safe layout, shelf gutter, one daily entry, Miuix navigation selection, continuous cover morph with matching corner radius, player expansion, native touch swipes through information, cover and lyrics, exact active line, manual-follow recovery, spring mini collapse, search/IME focus, playlist filters/loading/retry, top/locate, settings hub/sub-pages with native round-trip, grouped song menu, audio controls, glyph lift/swell, neutral timeline, unique about/licenses, retained settings scroll, collapsing header, drag dismissal and wide layout.');
+    fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ result: 'passed', engine: 'real Rust/WASM; mock native service bridge', settings:{uniqueAbout:true,licenses:true,scrollRestoration:true,collapsingHeader:true,dragDismiss:true},audio:{speedMessage:true,fadeMessage:true,narrow:true},karaoke:{glyphLift:true,glyphScale:true,wordFill:true,pause:true,seek:true,betweenPulses:true,lineFallback:true}, artwork: { unique: artworkRequests.size, maximumRequestsPerArtwork: Math.max(...artworkRequests.values()), decodedNodeRetained: true, pageAndPlayerReuse: true }, dock: dockSettled, cover: { frames: morph.filter(f => f.active).length, landed: landed.radius, handedOver: !landed.overlay }, focal, bounds, screenshots: fs.readdirSync(output).filter(n => n.endsWith('.png')) }, null, 2));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

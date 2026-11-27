@@ -1,4 +1,16 @@
 <resources>
+    <string name="personalization_group">个性化</string>
+    <string name="about_auralis">关于 Auralis</string>
+    <string name="about_tagline">让旋律与歌词，陪伴每一天</string>
+    <string name="about_footer">仅供学习与技术研究</string>
+    <string name="project_home">项目主页</string>
+    <string name="version_history">版本记录</string>
+    <string name="feedback">反馈问题</string>
+    <string name="open_source_licenses">开源许可</string>
+    <string name="licenses">开源许可</string>
+    <string name="copy_project_address">复制项目地址</string>
+    <string name="project_address_copied">项目地址已复制</string>
+    <string name="external_open_failed">无法打开浏览器，可使用“复制项目地址”</string>
     <string name="audio_effects">音频效果</string>
     <string name="playback_speed">播放速度</string>
     <string name="system_equalizer">系统均衡器</string>
@@ -252,7 +264,7 @@
     <string name="playlist_retry_hint">可以重试，或返回选择其他歌单。</string>
     <string name="playlist_invalid">这个入口没有有效的歌单编号，请返回并刷新推荐。</string>
     <string name="playlist_response_invalid">服务未返回有效歌曲列表，请重试。</string>
-    <string name="ui_customize">主题与界面</string>
+    <string name="ui_customize">主题与外观</string>
     <string name="ui_customize_summary">底栏、封面、列表与动效</string>
     <string name="lyrics_style">歌词外观</string>
     <string name="lyrics_style_summary">排版、字号与渐变模糊</string>

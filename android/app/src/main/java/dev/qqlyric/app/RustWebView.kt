@@ -25,7 +25,7 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 
 // Native bridge allowlist only; page composition and destinations live in Rust.
-private val SETTINGS_ROUTES=setOf("settings","appearance","monet","monet-source","monet-style","monet-spec","quality","storage","about","ui-customize","ui-dock","ui-player","ui-list","ui-motion","lyrics-style","lyric-type","lyric-effect")
+private val SETTINGS_ROUTES=setOf("settings","appearance","monet","monet-source","monet-style","monet-spec","quality","storage","about","licenses","ui-customize","ui-dock","ui-player","ui-list","ui-motion","lyrics-style","lyric-type","lyric-effect")
 
 /** Only window/theme/system bridges live here. All visible application pages and
  * event/motion logic are compiled from the Rust ui crate into the bundled WASM module. */
@@ -43,10 +43,13 @@ private val SETTINGS_ROUTES=setOf("settings","appearance","monet","monet-source"
         val top=with(density){WindowInsets.statusBars.union(WindowInsets.displayCutout).union(WindowInsets.captionBar).getTop(this).toDp().value.toInt()}
         val bottom=with(density){WindowInsets.navigationBars.getBottom(this).toDp().value.toInt()}
         val palette=JSONObject().apply{
-            fun color(key:String,argb:Int){put(key,String.format("#%06X",argb and 0xffffff))}
+            fun color(key:String,argb:Int){put(key,String.format("#%06X%02X",argb and 0xffffff,argb ushr 24))}
             color("bg",colors.surface.toArgb());color("card",colors.surfaceContainer.toArgb())
             color("fg",colors.onSurface.toArgb());color("muted",colors.onSurfaceVariantSummary.toArgb())
             color("primary",colors.primary.toArgb());color("on-primary",colors.onPrimary.toArgb());color("border",colors.surfaceContainerHighest.toArgb())
+            color("card-fg",colors.onSurfaceContainer.toArgb());color("section-fg",colors.onBackgroundVariant.toArgb());color("divider",colors.dividerLine.toArgb())
+            color("secondary",colors.secondary.toArgb());color("on-secondary",colors.onSecondary.toArgb());color("disabled",colors.disabledOnSurface.toArgb());color("error",colors.error.toArgb());color("window-dimming",colors.windowDimming.toArgb())
+            color("disabled-primary",colors.disabledPrimary.toArgb());color("disabled-secondary",colors.disabledSecondary.toArgb());color("disabled-on-primary",colors.disabledOnPrimary.toArgb());color("disabled-on-secondary",colors.disabledOnSecondary.toArgb())
         }.toString()
         SideEffect{
             host.palette=palette;host.safeTop=top;host.safeBottom=bottom
@@ -221,6 +224,8 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
             "animation_rate"->animationRate(event.optBoolean("active"))
             "ready"->{ready=true;contentKeys=null;lastPulse="";publish()}
             "navigate"->{val page=event.optString("page");if(page in setOf("home","mine","search")+SETTINGS_ROUTES)m.navigate(page)}
+            "open_external"->{val url=event.optString("url");if(url in setOf("https://github.com/Memories-white/Auralis","https://github.com/Memories-white/Auralis/releases","https://github.com/Memories-white/Auralis/issues")){runCatching{activity.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,Uri.parse(url)))}.onFailure{m.status=activity.getString(R.string.external_open_failed)}}}
+            "copy_project"->{val clipboard=activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager;clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Auralis","https://github.com/Memories-white/Auralis"));m.status=activity.getString(R.string.project_address_copied)}
             "back"->m.back()
             "play"->{val rows=source(event.optString("source"));val requested=event.optInt("index",-1);val mid=event.optString("mid");val index=if(mid.isNotBlank())rows.indexOfFirst{it.optString("mid")==mid}else requested;if(index in rows.indices)m.play(rows,index)}
             "playlist"->{val item=JSONObject().put("id",event.optLong("id")).put("dirid",event.optLong("dirid")).put("title",event.optString("title")).put("cover",event.optString("cover")).put("kind",event.optString("kind"));if(event.optString("source")=="recommendations")m.recommendedPlaylist(item)else m.playlist(item.optLong("id"),item.optLong("dirid"),item.optString("title"),item.optString("cover"))}

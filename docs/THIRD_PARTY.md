@@ -13,6 +13,8 @@
 
 ## 依赖
 
+0.5.6 使用 Miuix 固定提交 `6d2554a850b8960e2616c968263ff64beb5ffb03`（v0.9.5-beta01）的 NavigationBar、Switch、Card、SmallTitle 和 Scaffold 契约核对布局、选中/按压状态及颜色角色；以 Rust/CSS 映射到既有WebView目标，原生MiuixTheme继续提供真实语义配色。SVG图标保留项目实现，CSS squircle缺少支持时采用圆角回退，不宣称它们是Compose原生组件。设置和关于的分组/导航关系参考同一Melox固定版本的SettingsScreen/AboutScreen，未复制其GPL界面实现。
+
 0.5.5 结合用户提供的播放器截图，研究同一Melox提交的 `FullPlayerScreen.kt`、`PlaybackSettingsSheets.kt`、`LyricRenderGeometry.kt` 和 `LyricsView.kt` 的可见效果，并参考 `AudioEffectPreferences.kt` 确认MiSound兼容入口。新增控制区、音效面板、队列策略与字形运动由Rust独立实现，未复制这些文件的新代码；原0.4.1中已注明Apache许可的移植范围不变。逐字的字形位移由真实词区间的揭示进度推导，不声称获取了原生逐字符时间，也没有移植原生文字栅格缓存器或液态玻璃渲染器。
 
 0.5.4 进一步研究 Melox 提交 `bfe7c5dc467b84d7a9df8e63c93208a3e6f61672` 的玻璃底栏、悬浮导航、歌曲栏尺寸和共享封面视觉行为，使用 Rust 状态/弹簧与 CSS 合成图层独立实现；未移植这些 GPL 文件源码。WebView 背景模糊不等同于 Melox 原生液态折射，性能测量也不代表其原生实现的帧率。

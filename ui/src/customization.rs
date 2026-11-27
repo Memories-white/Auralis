@@ -13,11 +13,10 @@ pub const OPTIONS: &[OptionSpec] = &[
         key: "bar",
         title: "底栏样式",
         values: &[
-            ("glass", "磨砂玻璃", "内容从底栏后透出，胶囊高亮"),
-            ("normal", "经典分栏", "系统栏底色，无浮层"),
-            ("floating", "悬浮胶囊", "与屏幕边缘留出间距"),
+            ("normal", "标准导航栏", "Miuix 图标与文字导航"),
+            ("floating", "悬浮导航栏", "Miuix 紧凑图标导航"),
         ],
-        default: "glass",
+        default: "normal",
     },
     OptionSpec {
         key: "compact",
@@ -39,8 +38,11 @@ pub const OPTIONS: &[OptionSpec] = &[
     },
     OptionSpec {
         key: "navLabels",
-        title: "底栏文字",
-        values: &[("on", "显示", "图标与文字"), ("off", "仅图标", "更紧凑的底栏")],
+        title: "标准底栏文字",
+        values: &[
+            ("on", "显示", "图标与文字"),
+            ("off", "仅图标", "更紧凑的底栏"),
+        ],
         default: "on",
     },
     OptionSpec {
@@ -183,9 +185,10 @@ pub fn title(v: &Value, key: &str) -> &'static str {
         .unwrap_or("")
 }
 pub fn set(v: &mut Value, key: &str, value: &str) -> bool {
-    if !OPTIONS.iter().any(|s| {
-        s.key == key && s.values.iter().any(|(id, _, _)| *id == value)
-    }) {
+    if !OPTIONS
+        .iter()
+        .any(|s| s.key == key && s.values.iter().any(|(id, _, _)| *id == value))
+    {
         return false;
     }
     if !v["uiPreferences"].is_object() {
@@ -231,9 +234,13 @@ mod tests {
     fn radios_mark_exactly_one_value() {
         let v = json!({"uiPreferences":{"bar":"floating"}});
         let rows = radios(&v, "bar");
-        assert_eq!(rows.len(), 3);
+        assert_eq!(rows.len(), 2);
         assert_eq!(rows.iter().filter(|r| r["selected"] == true).count(), 1);
-        assert!(rows[2]["action"] == "ui:bar:floating");
+        assert!(rows[1]["action"] == "ui:bar:floating");
+        assert_eq!(
+            get(&json!({"uiPreferences":{"bar":"glass"}}), "bar"),
+            "normal"
+        );
         assert!(radios(&v, "missing").is_empty());
     }
 }

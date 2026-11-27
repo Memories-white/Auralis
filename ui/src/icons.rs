@@ -1,6 +1,5 @@
-//! Inline SVG glyphs. Outline glyphs are used for inactive navigation and list
-//! rows; filled variants exist for the navigation items so the dock can cross-fade
-//! between them while the selection indicator travels (Melox-style).
+//! Inline SVG glyphs for the Rust renderer. Navigation keeps one glyph and uses
+//! the Miuix selected/pressed color-alpha contract instead of cross-fading fills.
 fn stroke(name: &str) -> Option<(&'static str, bool)> {
     let path = match name {
         "home" => "M3 10.5 12 3l9 7.5M5.5 9v12h5v-7h3v7h5V9",
@@ -64,19 +63,5 @@ pub fn icon(name: &str) -> String {
     format!(
         "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\" fill=\"{}\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"{path}\"/></svg>",
         if filled { "currentColor" } else { "none" }
-    )
-}
-
-/// Two stacked glyphs used by the dock so the selected item can cross-fade from
-/// the outline to the filled icon while the pill indicator glides.
-pub fn icon_pair(name: &str) -> String {
-    let filled = format!("{name}-filled");
-    if stroke(&filled).is_none() {
-        return icon(name);
-    }
-    format!(
-        "<span class=\"nav-glyph\">{}<span class=\"nav-glyph-fill\">{}</span></span>",
-        icon(name),
-        icon(&filled)
     )
 }

@@ -38,7 +38,7 @@ const live={mid:'motion',title:'Motion study',artist:'Auralis',cover:'https://ex
   });
   const after=await metrics();const delta={};for(const key of ['LayoutCount','LayoutDuration','RecalcStyleCount','RecalcStyleDuration','ScriptDuration','TaskDuration'])delta[key]=after[key]-before[key];
   const geometry=await page.evaluate(()=>({miniHeight:document.querySelector('#mini-player').getBoundingClientRect().height,navHeight:document.querySelector('#navigation').getBoundingClientRect().height,lyricsNodes:document.querySelectorAll('.lyric-line').length,clipPath:getComputedStyle(document.querySelector('#player')).clipPath}));
-  assert.deepEqual(geometry,{miniHeight:52,navHeight:54,lyricsNodes:0,clipPath:'none'});
+  assert.deepEqual(geometry,{miniHeight:68,navHeight:64,lyricsNodes:0,clipPath:'none'});
   const result={tag,scope:'Chromium real WASM, 400 line fixture; callbacks and CPU, not phone GPU FPS',frames,delta,geometry};
   fs.writeFileSync(path.join(output,tag+'.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   await page.screenshot({path:path.join(output,tag+'-player.png')});
@@ -47,7 +47,7 @@ const live={mid:'motion',title:'Motion study',artist:'Auralis',cover:'https://ex
   data.colorMode='dark';
   await page.evaluate(data=>auralisUpdate(JSON.stringify({type:'content',state:data})),data);
   await page.waitForTimeout(400);await page.screenshot({path:path.join(output,tag+'-dock-dark.png')});
-  for(const [bar,mini,nav,width] of [['floating',64,64,308],['normal',68,64,411]]){
+  for(const [bar,mini,nav,width] of [['floating',68,52,192],['normal',68,64,411]]){
    data.uiPreferences={bar};await page.evaluate(data=>auralisUpdate(JSON.stringify({type:'content',state:data})),data);
    const size=await page.evaluate(()=>({mini:document.querySelector('#mini-player').getBoundingClientRect().height,nav:document.querySelector('#navigation').getBoundingClientRect().height,width:document.querySelector('#navigation').getBoundingClientRect().width}));
    assert.deepEqual(size,{mini,nav,width});

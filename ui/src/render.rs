@@ -1,6 +1,6 @@
 use crate::{
     b, format_time,
-    icons::{icon, icon_pair},
+    icons::icon,
     labels::{esc, label, text},
     n, s,
 };
@@ -116,10 +116,8 @@ pub fn header(p: &Value, data: &Value) -> String {
     } else {
         String::new()
     };
-    format!(
-        "<div class=\"header-tools\">{back}<span></span>{tools}</div><h1>{}</h1>",
-        esc(&text(&p["title"]))
-    )
+    let title = esc(&text(&p["title"]));
+    format!("<div class=header-tools>{back}<span class=compact-title aria-hidden=true>{title}</span>{tools}</div><div class=large-title><h1>{title}</h1></div>")
 }
 pub fn navigation(p: &Value) -> String {
     if !b(p, "root") {
@@ -131,18 +129,17 @@ pub fn navigation(p: &Value) -> String {
         .iter()
         .position(|item| item["route"] == p["route"])
         .unwrap_or(0);
-    // The indicator is a sibling of the items, so Rust can glide it between equal
-    // slots without measuring each button. Slot widths are equal by CSS.
-    let mut html = String::from("<i class=\"nav-pill\" aria-hidden=\"true\"></i>");
+    // One destination model drives both ordinary navigation and the wide rail.
+    let mut html = String::new();
     for (index, item) in items.iter().enumerate() {
         let current = index == selected;
         html.push_str(&format!(
-            "<button class=\"nav-item {}\" data-action=\"navigate:{}\" data-index=\"{index}\" style=\"--slot:{}\" {}>{}<span>{}</span></button>",
+            "<button class=\"nav-item {}\" role=tab aria-selected=\"{current}\" data-action=\"navigate:{}\" data-index=\"{index}\" style=\"--slot:{}\" {}><span class=nav-glyph>{}</span><span>{}</span></button>",
             if current { "selected" } else { "" },
             esc(s(item, "route")),
             index as f64 / count as f64,
             if current { "aria-current=\"page\"" } else { "" },
-            icon_pair(s(item, "icon")),
+            icon(s(item, "icon")),
             esc(&text(&item["text"]))
         ));
     }
@@ -204,13 +201,13 @@ fn node(v: &Value, data: &Value, live: &Value, parent_enabled: bool) -> String {
         "preference"|"radio"|"switch"=>{
             let kind=s(v,"kind");
             let selected=b(v,"selected")||b(v,"checked");
-            let trailing=if kind=="switch"{format!("<span class=\"switch {}\" role=switch aria-checked=\"{}\"><i></i></span>",if b(v,"checked"){"checked"}else{""},b(v,"checked"))}else if kind=="radio"{format!("<span class=\"radio {}\" role=radio aria-checked=\"{}\">{}</span>",if selected{"checked"}else{""},selected,icon("check"))}else{format!("<span class=pref-tail>{}</span>",icon("chevron"))};
+            let trailing=if kind=="switch"{format!("<span class=\"switch {}\" aria-hidden=true><i></i></span>",if b(v,"checked"){"checked"}else{""})}else if kind=="radio"{format!("<span class=\"radio {}\" aria-hidden=true>{}</span>",if selected{"checked"}else{""},icon("check"))}else{format!("<span class=pref-tail>{}</span>",icon("chevron"))};
+            let semantics=if kind=="switch"||kind=="radio"{format!("role={} aria-checked={selected}",if kind=="switch"{"switch"}else{"radio"})}else{String::new()};
             let summary=text(&v["summary"]);
             let glyph_html = glyph(s(v,"glyph"));
-            format!("<button class=\"preference pref-{kind}\" data-action=\"{}\" {} aria-pressed=\"{}\">{glyph_html}<span class=pref-text><strong>{}</strong>{}</span>{}{trailing}</button>",
+            format!("<button class=\"preference pref-{kind}\" data-action=\"{}\" {} {semantics}>{glyph_html}<span class=pref-text><strong>{}</strong>{}</span>{}{trailing}</button>",
                 esc(action_id),
                 if active{""}else{"disabled"},
-                selected,
                 esc(&text(&v["text"])),
                 if summary.is_empty(){String::new()}else{format!("<small>{}</small>",esc(&summary))},
                 trailing_value(&v["value"]),
@@ -462,6 +459,10 @@ fn quality_badge(live: &Value) -> &str {
 
 fn slot(kind: &str, data: &Value, live: &Value) -> String {
     match kind{
+    "about_identity"=>format!("<div class=about-identity><div class=about-logo aria-hidden=true><svg viewBox=\"0 0 108 108\"><path d=\"M34 74 48 38C50.5 31.2 57.5 31.2 60 38L74 74\" fill=none stroke=currentColor stroke-width=8.4 stroke-linecap=round stroke-linejoin=\"round\"/><path d=\"M49 50C49 48.6 50.6 47.8 51.8 48.6L60 55.1C61.2 55.9 61.2 57.7 60 58.5L51.8 65C50.6 65.8 49 65 49 63.6Z\" fill=\"currentColor\"/></svg></div><h2>Auralis</h2><p>{}</p><span class=about-version>{}</span></div>",label("about_tagline"),esc(s(data,"version"))),
+    "licenses"=>{
+        [("Auralis · MIT",include_str!("../../LICENSE")),("Miuix · Apache-2.0",include_str!("../../docs/licenses/MIUIX-LICENSE")),("Melodist · MIT",include_str!("../../docs/licenses/Melodist-LICENSE")),("Melox 歌词 · Apache-2.0",include_str!("../../docs/licenses/Melox-lyrics-Apache-2.0")),("QRC · MIT",include_str!("../../docs/licenses/QRC-LICENSE"))].iter().map(|(name,license)|format!("<details class=license-document><summary>{}<span>{}</span></summary><pre>{}</pre></details>",esc(name),icon("chevron"),esc(license))).collect()
+    },
     "quality"=>quality_choices(data,live),
     "custom_color"=>format!("<div class=card style=\"--inset:12px;--padding:20px\"><label class=color-picker>{}<input id=custom-color type=color value=\"#{}\" {} /></label><div class=hex-entry><input id=custom-color-hex type=text maxlength=7 aria-label=\"{}\" value=\"#{}\" spellcheck=false /><button data-action=custom_color_apply>{}</button></div><p id=custom-color-error class=summary role=status></p><div class=color-presets>{}</div></div>",label("source_custom"),esc(s(data,"monetColor")),if b(data,"monet"){""}else{"disabled"},label("color_hex"),esc(s(data,"monetColor")),label("apply_color"),["3482FF","7165C8","A34C68","B46A33","50836A","586C83","9C4263","77804D"].iter().map(|color|format!("<button data-action=\"custom-color:{color}\" aria-label=\"#{color}\" style=\"--swatch:#{color}\" {}>{}</button>",if b(data,"monet"){""}else{"disabled"},if s(data,"monetColor").eq_ignore_ascii_case(color){icon("check")}else{String::new()})).collect::<String>()),
     "color_preview"=>format!("<div class=color-preview><h3>{}</h3><p>{}</p><div><i></i><i></i><i></i><i></i></div></div>",label("preview_title"),label("preview_summary")),
@@ -596,7 +597,9 @@ pub fn overlay(sheet: &str, data: &Value, live: &Value, can_back: bool) -> Optio
                     ("song_information", "show-song-info", "info"),
                 ] {
                     html.push_str(&format!("<button class=action-row data-action={action} {}>{}<span>{}</span>{}</button>",if b(data,"collectionBusy"){"disabled"}else{""},icon(icon_name),label(key),if action=="quality"{format!("<small>{}</small>",quality_badge(live))}else{String::new()}));
-                    if action=="add-playlist" {html.push_str(&format!("<button class=action-row data-action=show-song-info>{}<span>{}：{}</span></button><button class=action-row data-action=show-song-info>{}<span>艺术家：{}</span></button>",icon("cover"),label("song_album"),escaped_or(s(&data["currentSong"],"album"),"information_unavailable"),icon("account"),esc(s(live,"artist"))));}
+                    if action == "add-playlist" {
+                        html.push_str(&format!("<button class=action-row data-action=show-song-info>{}<span>{}：{}</span></button><button class=action-row data-action=show-song-info>{}<span>艺术家：{}</span></button>",icon("cover"),label("song_album"),escaped_or(s(&data["currentSong"],"album"),"information_unavailable"),icon("account"),esc(s(live,"artist"))));
+                    }
                 }
                 html.push_str("</div>");
                 html
