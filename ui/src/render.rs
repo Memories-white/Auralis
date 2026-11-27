@@ -266,8 +266,28 @@ fn node(v: &Value, data: &Value, live: &Value, parent_enabled: bool) -> String {
         }
         "search_input"=>format!("<div class=search-field>{}<input id=search-input type=search inputmode=search enterkeyhint=search placeholder=\"{}\" aria-label=\"{}\" value=\"{}\" autocomplete=off /><button data-action=search_submit aria-label=\"{}\">{}</button></div>",icon("search"),esc(&label("search_hint")),esc(&label("search")),esc(s(data,"query")),label("search"),icon("chevron")),
         "feed_status"=>{
-            let error=s(data,"discoveryError");let msg=if !error.is_empty(){error.to_owned()}else{label(if b(data,"discoveryLoading"){"discovery_loading"}else if !b(data,"loggedIn"){"login_recommendations"}else if !b(data,"discoveryMore"){"discovery_end"}else{"discovery_scroll"})};
-            format!("<div class=feed-status role=status>{}{}{}</div>",if b(data,"discoveryLoading"){"<i class=spinner></i>"}else{""},esc(&msg),if !error.is_empty(){button("load_more","retry",false)}else{String::new()})
+            let error = s(data, "discoveryError");
+            let loading = b(data, "discoveryLoading");
+            let can_load = b(data, "loggedIn") && b(data, "homeReady") && b(data, "discoveryMore");
+            let msg = if !error.is_empty() {
+                error.to_owned()
+            } else if loading {
+                label("discovery_loading")
+            } else if !b(data, "loggedIn") {
+                label("login_recommendations")
+            } else if b(data, "discoveryMore") {
+                label("discovery_scroll")
+            } else {
+                label("discovery_end")
+            };
+            let control = if !error.is_empty() {
+                button("load_more", "retry", false)
+            } else if can_load && !loading {
+                button("load_more", "load_more_songs", false)
+            } else {
+                String::new()
+            };
+            format!("<div class=feed-status role=status>{}{}{}</div>", if loading { "<i class=spinner></i>" } else { "" }, esc(&msg), control)
         }
         "loading"=>format!("<div class=loading role=status><i class=spinner></i>{}</div>",esc(&text(&v["text"]))),
         "platform"=>slot(s(v,"slot"),data,live),_=>String::new()
@@ -427,16 +447,26 @@ fn quality_choices(data: &Value, live: &Value) -> String {
     html.push_str(&node(&json!({"kind":"switch","text":{"resource":"quality_fallback"},"summary":{"resource":"quality_fallback_summary"},"checked":b(data,"quality_fallback"),"enabled":matches!(s(data,"quality"),"sq"|"hq"),"action":"fallback"}),data,live,true));
     html
 }
-pub fn overlay(
-    sheet: &str,
-    data: &Value,
-    live: &Value,
-    can_back: bool,
-    entering: bool,
-) -> String {
+pub struct Overlay {
+    pub class: &'static str,
+    pub title: String,
+    pub header: String,
+    pub items: String,
+    pub message: String,
+    close: &'static str,
+}
+
+impl Overlay {
+    pub fn markup(&self, entering: bool) -> String {
+        format!("<div class=modal-backdrop data-action={}></div><section id=sheet class=\"sheet {} {}\" role=dialog aria-modal=true aria-label=\"{}\"><div class=sheet-handle></div><header id=sheet-header>{}</header><div class=sheet-content><div id=sheet-items>{}</div><p id=sheet-message class=collection-message role=status>{}</p></div></section>",
+            self.close, self.class, if entering{"enter"}else{""}, esc(&self.title), self.header, self.items, esc(&self.message))
+    }
+}
+
+pub fn overlay(sheet: &str, data: &Value, live: &Value, can_back: bool) -> Option<Overlay> {
     let qr = b(data, "qrOpen");
     if !qr && sheet.is_empty() {
-        return String::new();
+        return None;
     }
     let title = label(if qr {
         "login_qq"
@@ -505,9 +535,19 @@ pub fn overlay(
                 html
             }
             "add-playlist" => {
-                let playlists=source(data,"playlists").iter().filter(|p|!b(p,"saved")&&n(p,"dirid")>0).map(|p|format!("<button class=playlist-row data-action=\"add:{}\">{}<span><strong>{}</strong><small>{} 首</small></span>{}</button>",n(p,"dirid"),art(s(p,"cover"),false,""),esc(s(p,"title")),n(p,"count"),icon("chevron"))).collect::<String>();
+                let disabled = if b(data, "collectionBusy") {
+                    "disabled"
+                } else {
+                    ""
+                };
+                let playlists=source(data,"playlists").iter().filter(|p|!b(p,"saved")&&n(p,"dirid")>0).map(|p|format!("<button class=playlist-row data-action=\"add:{}\" {disabled}>{}<span><strong>{}</strong><small>{} 首</small></span>{}</button>",n(p,"dirid"),art(s(p,"cover"),false,""),esc(s(p,"title")),n(p,"count"),icon("chevron"))).collect::<String>();
                 if playlists.is_empty() {
-                    format!("<p class=sheet-note>{}</p>", label("no_writable_playlists"))
+                    let hint = if !b(data, "libraryReady") && b(data, "busy") {
+                        "loading_library"
+                    } else {
+                        "no_writable_playlists"
+                    };
+                    format!("<p class=sheet-note>{}</p>", label(hint))
                 } else {
                     playlists
                 }
@@ -527,7 +567,26 @@ pub fn overlay(
             _ => String::new(),
         }
     };
-    format!("<div class=modal-backdrop data-action={close}></div><section class=\"sheet {} {}\" role=dialog aria-modal=true aria-label=\"{}\"><div class=sheet-handle></div><header>{}<h2>{title}</h2>{}</header><div class=sheet-content>{content}<p class=collection-message role=status>{}</p></div></section>",if qr{"qr-sheet"}else if can_back||matches!(sheet,"song-actions"|"add-playlist"){"half-sheet"}else{""},if entering{"enter"}else{""},esc(&title),if can_back&&!qr{action("sheet_back",&label("back"),"back","")}else{String::new()},action(close,&label("cancel"),"close",""),esc(s(data,"collectionMessage")))
+    let back = if can_back && !qr {
+        action("sheet_back", &label("back"), "back", "")
+    } else {
+        String::new()
+    };
+    let cancel = action(close, &label("cancel"), "close", "");
+    Some(Overlay {
+        class: if qr {
+            "qr-sheet"
+        } else if can_back || matches!(sheet, "song-actions" | "add-playlist") {
+            "half-sheet"
+        } else {
+            ""
+        },
+        header: format!("{back}<h2>{}</h2>{cancel}", esc(&title)),
+        title,
+        items: content,
+        message: s(data, "collectionMessage").to_owned(),
+        close,
+    })
 }
 pub fn floating(show_top: bool, locate: bool) -> String {
     format!(

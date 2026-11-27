@@ -32,6 +32,7 @@ struct App {
     painted_route: String,
     sheet: String,
     sheet_stack: Vec<String>,
+    painted_overlay: Option<render::Overlay>,
     player: bool,
     player_page: usize,
     scrolls: HashMap<String, i32>,
@@ -376,6 +377,7 @@ pub fn update(input: &str) {
                         app.active_line = None;
                         if matches!(app.sheet.as_str(), "song-actions" | "add-playlist") {
                             app.sheet.clear();
+                            app.sheet_stack.clear();
                             app.paint_overlay();
                         }
                     }
@@ -555,7 +557,9 @@ impl App {
             .strip_prefix("add:")
             .and_then(|s| s.parse::<i64>().ok())
         {
-            post(json!({"type":"add_cloud","mid":s(&self.live,"mid"),"dirid":dirid}));
+            if !b(&self.data, "collectionBusy") {
+                post(json!({"type":"add_cloud","mid":s(&self.live,"mid"),"dirid":dirid}));
+            }
             return;
         }
         if let Some(query) = action.strip_prefix("query:") {
@@ -694,7 +698,7 @@ impl App {
                     post(json!({"type":"prepare_actions"}));
                 }
                 self.paint_overlay();
-                if action == "add-playlist" {
+                if action == "add-playlist" && !b(&self.data, "libraryReady") {
                     post(json!({"type":"refresh_library"}));
                 }
             }
@@ -900,10 +904,9 @@ impl App {
         }
         let count = self.dock_count.max(1);
         for index in 0..count {
-            if let Ok(Some(item)) = doc().query_selector(&format!(
-                "#navigation .nav-item:nth-of-type({})",
-                index + 1
-            )) {
+            if let Ok(Some(item)) =
+                doc().query_selector(&format!("#navigation .nav-item:nth-of-type({})", index + 1))
+            {
                 let distance = (index as f64 - self.dock.position).abs();
                 let proximity = (1.0 - distance).clamp(0.0, 1.0);
                 style(&item, "--nav-p", &format!("{proximity:.4}"));
@@ -918,10 +921,11 @@ impl App {
         if (position - self.written_dock).abs() > 0.0002 {
             self.paint_dock();
         }
-
     }
     fn advance_mini(&mut self, time: f64, dt: f64) {
-        let target = if !self.player && self.mini_until > time && customization::get(&self.data, "compact") != "on"
+        let target = if !self.player
+            && self.mini_until > time
+            && customization::get(&self.data, "compact") != "on"
         {
             1.0
         } else {
@@ -967,7 +971,9 @@ impl App {
             (Some(pane), Some(cover)) => (pane, cover),
             _ => return,
         };
-        let side = (pane.client_width() - 64).min(pane.client_height() - 40).clamp(0, 460);
+        let side = (pane.client_width() - 64)
+            .min(pane.client_height() - 40)
+            .clamp(0, 460);
         style(&cover, "width", &format!("{side}px"));
         style(&cover, "height", &format!("{side}px"));
     }
@@ -995,9 +1001,9 @@ impl App {
         if let Some(old) = el("shared-artwork") {
             old.remove();
         }
-        let Some(mini_art) = el("mini-player").and_then(|mini| {
-            mini.query_selector(".mini-art").ok().flatten()
-        }) else {
+        let Some(mini_art) =
+            el("mini-player").and_then(|mini| mini.query_selector(".mini-art").ok().flatten())
+        else {
             return;
         };
         let Ok(overlay) = doc().create_element("div") else {
@@ -1111,7 +1117,11 @@ impl App {
             }
             return;
         };
-        let done = if self.player { p >= 0.9995 } else { p <= 0.0005 };
+        let done = if self.player {
+            p >= 0.9995
+        } else {
+            p <= 0.0005
+        };
         if let Some(player) = el("player") {
             style(&player, "--cover-opacity", if done { "1" } else { "0" });
         }
@@ -1157,21 +1167,40 @@ impl App {
         self.apply_sheet(p);
     }
     fn paint_overlay(&mut self) {
-        // Sheets slide in only when the overlay opens; switching to a sub-sheet
-        // (quality, add-to-playlist) must not replay the entry animation.
         let open = b(&self.data, "qrOpen") || !self.sheet.is_empty();
         let entering = open && !self.overlay_open;
         self.overlay_open = open;
-        set_html(
-            "overlays",
-            &render::overlay(
-                &self.sheet,
-                &self.data,
-                &self.live,
-                !self.sheet_stack.is_empty(),
-                entering,
-            ),
+        let next = render::overlay(
+            &self.sheet,
+            &self.data,
+            &self.live,
+            !self.sheet_stack.is_empty(),
         );
+        match (&self.painted_overlay, &next) {
+            (Some(old), Some(new)) if old.class == new.class => {
+                if old.title != new.title {
+                    if let Some(sheet) = el("sheet") {
+                        class(&sheet, "enter", false);
+                        let _ = sheet.set_attribute("aria-label", &new.title);
+                    }
+                }
+                if old.header != new.header {
+                    set_html("sheet-header", &new.header);
+                }
+                if old.items != new.items {
+                    set_html("sheet-items", &new.items);
+                }
+                if old.message != new.message {
+                    if let Some(message) = el("sheet-message") {
+                        message.set_text_content(Some(&new.message));
+                    }
+                }
+            }
+            (_, Some(new)) => set_html("overlays", &new.markup(entering)),
+            (Some(_), None) => set_html("overlays", ""),
+            (None, None) => {}
+        }
+        self.painted_overlay = next;
     }
     fn paint_progress(&self) {
         let duration = n(&self.live, "duration").max(0);

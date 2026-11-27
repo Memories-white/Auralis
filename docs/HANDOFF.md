@@ -6,17 +6,40 @@
 
 | 项目 | 状态 / 入口 |
 | :-- | :-- |
-| 日期、版本 | 2026-11-27 · `0.5.1-preview` · versionCode `28` |
-| 基线 | `571b865` · 0.5.0-preview，共享封面动效与 Melox 式底栏 |
+| 日期、版本 | 2026-11-27 · `0.5.2-preview` · versionCode `29` |
+| 基线 | `a457103` · 已先推送本地0.5.1，再合并远程修复链 |
 | 当前提交 | 本文与本次实现同一个提交；使用 `git log -1` 获取完整 SHA，避免文档自引用哈希 |
-| 最新本地包 | `APKs/Auralis-v0.5.1-preview.apk` |
-| APK SHA256 | `8C1E484662A4510D221A01104D2425C20EE4011E37C4DE4028C8CA375D4A6A78` |
-| 包体 | 16023055 字节；`apksigner verify` v2 通过（debug 证书） |
+| 最新本地包 | `APKs/Auralis-v0.5.2-preview.apk` |
+| APK SHA256 | `BD022BA7C35702FC833C6609D52AF9D6C6B78CA46E3660A144FF6349F3B9FBC9` |
+| 包体 | 16048403 字节；`apksigner verify` v2 通过（debug 证书） |
 | 仓库 | [Memories-white/Auralis](https://github.com/Memories-white/Auralis) · public |
 | 已发布版本 | GitHub Release 与主分支分开管理；本次不自动创建 Release |
 | 当前界面架构 | Rust/WASM + Android WebView；不要恢复 Kotlin 页面或增加 JS 动画控制器 |
 
 ## 本次改动交接表
+
+| 来源 / 差异 | 合并处理 | 验证与后续 |
+| :-- | :-- | :-- |
+| 本地main比远程领先2个提交 | 先推送571b865（共享封面/底栏）和a457103（歌单分页），远程main从e84bf3b推进到a457103 | 无未提交文件；没有覆盖或重置DeepSeek已提交的本地工作 |
+| fix/qq-login-confirmation · a3b9261 | 335b333合并；二维码使用已验证的Base64图片；授权确认后不重新轮询，DNS错误原步骤重试 | 合并CSP同时允许blob封面与data二维码；保留uiPreferences发布和退出清除目录缓存 |
+| fix/player-swipe-navigation · 8736099 | 54f99d0合并；嵌套滚动容器统一pan-y，横向手势继续交给Rust | 保留本地封面圆角/底栏回归，加入CDP真实touchStart/touchMove/touchEnd五次往返切页检查 |
+| fix/playlist-song-add · e613f94 | 合并添加歌曲权限、类型解析、回执核对、稳定弹窗和推荐分页修复 | 保留advance_sheet闭式弹簧、后台目录快照、700首按需分页与play_all接口，不以旧分支覆盖整文件 |
+| 两套分页的兼容 | 主界面继续playlist_page/playlist_all按需加载；分支playlist模块保留legacy全量读取、音乐库与添加后成员核对 | 全量成员核对与所有真实API仍需账号验证；现有播放全部3000首/40页安全界限不变 |
+| 弹窗冲突 | Rust Overlay分块更新header/items/message，保留sheet节点；仅首次挂载执行enter，子页切换去掉enter，进度/状态更新不重播动画 | 浏览器检查添加歌单前后sheet同一节点、只列可写歌单、忙碌时禁用重复提交 |
+| 分支归属 | 三个修复分支是a3b9261→8736099→e613f94连续链；按顺序合并保留祖先关系 | 不删除远程分支，不强推，不创建Release |
+
+## 0.5.2 验证表
+
+| 检查 | 结果 |
+| :-- | :-- |
+| 单元与策略 | Rust UI25、core36、Java4组通过；包含授权重试、分页、写入回执、推荐去重和帧率无关弹簧 |
+| 构建 | build.ps1 -Offline完整成功（WASM、NDK、Gradle）；code29；debug APK v2签名通过；哈希见上表 |
+| 浏览器 | 实际WASM、模拟服务：二维码296px可解码且可见、五次真实触屏切页、700首分页与play_all、sheet节点保留、防重复提交、封面缓存/圆角交接/底栏动效均通过 |
+| 量化夹具 | 26种图片每资源最多请求1次；封面共享浮层12帧后落位28px并完成交接；是浏览器回调/夹具，不能作为实机GPU或CDN测量 |
+| 实机 | 本轮未安装或重新扫码/云端添加歌曲；分支历史的实机结果不等于合并版验证 |
+| 发布 | 本地先上传，最终合并提交再推送main；保留3个修复分支；没有上传APK到GitHub Release |
+
+## 0.5.1 历史改动交接表
 
 | 需求 / 根因 | 修复行为与源码入口 | 验证 / 后续 |
 | :-- | :-- | :-- |

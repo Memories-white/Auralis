@@ -171,12 +171,13 @@ class MusicState(private val context:Context,private val protocol:(String,String
             .put("excludeIds",JSONArray(daily.map{it.optLong("id")}))){result->
             if(request!=feedGeneration)return@call
             discoveryLoading=false
-            if(!result.optBoolean("ok")){discoveryError=result.optString("error",context.getString(R.string.request_retry));return@call}
+            if(!result.optBoolean("ok")){discoveryError=displayError(result.optString("error",context.getString(R.string.request_retry)));return@call}
             val data=result.getJSONObject("data")
             val blocked=(home.optJSONArray("daily")?.objects().orEmpty()+if(replacingDiscovery)emptyList()else discoverySongs).map{it.optString("mid")}.toHashSet()
             val added=data.optJSONArray("songs")?.objects().orEmpty().filter{blocked.add(it.optString("mid"))}
             discoverySongs=(if(replacingDiscovery)emptyList()else discoverySongs)+added;replacingDiscovery=false;feedPage=data.optInt("nextPage",feedPage+1);saveCatalog()
-            discoveryMore=data.optBoolean("hasMore")&&added.isNotEmpty()
+            discoveryMore=data.optBoolean("hasMore")
+            discoveryError=displayError(data.optString("error"))
             if(BuildConfig.DEBUG)android.util.Log.i("AuralisDiscovery","batch=${added.size} total=${discoverySongs.size} next=$feedPage more=$discoveryMore dailyOverlap=${discoverySongs.count{s->daily.any{it.optString("mid")==s.optString("mid")}}}")
         }
     }
@@ -198,8 +199,9 @@ class MusicState(private val context:Context,private val protocol:(String,String
     fun openSongs(songs:List<JSONObject>,label:String,cover:String=""){playlistGeneration++;cancelDetail();if(page!="songs")parentPage=page;detailTitle=label;detailCover=cover.ifBlank{songs.firstOrNull()?.artwork().orEmpty()};tracks=songs;detailTotal=songs.size;detailRevision++;navigate("songs")}
     fun daily(){
         val songs=home.optJSONArray("daily")?.objects().orEmpty()
+        val id=home.optLong("dailyId");val dirid=home.optLong("dailyDirid")
         if(songs.isNotEmpty())openSongs(songs,context.getString(R.string.daily_mix))
-        else if(!loggedIn)login()else if(home.optLong("dailyId")>0)playlist(home.optLong("dailyId"),0,context.getString(R.string.daily_mix))else refreshHome()
+        else if(!loggedIn)login()else if(id>0||dirid>0)playlist(id,dirid,context.getString(R.string.daily_mix))else refreshHome()
     }
     fun playlist(id:Long,dirid:Long,label:String,cover:String=""){
         loadDetail(DetailRequest("playlist",id,dirid,label,cover.takeUnless{it=="null"}.orEmpty()))
@@ -323,15 +325,17 @@ class MusicState(private val context:Context,private val protocol:(String,String
     fun addCloudSong(song:JSONObject,dirid:Long){
         if(collectionBusy)return
         if(!loggedIn){collectionMessage=context.getString(R.string.login_library_summary);return}
+        val target=if(dirid==201L)null else writablePlaylists().firstOrNull{it.optLong("dirid")==dirid}
+        if(dirid!=201L&&target==null){collectionMessage=context.getString(R.string.no_writable_playlists);return}
         if(dirid==201L&&cloudLiked(song)){collectionMessage=context.getString(R.string.already_liked);return}
         collectionBusy=true;collectionMessage=context.getString(R.string.adding_song)
-        call("add_song",JSONObject().put("session",session).put("dirid",dirid).put("id",song.optLong("id"))){result->
+        val tid=target?.optLong("id")?:0L
+        call("add_song",JSONObject().put("session",session).put("dirid",dirid).put("tid",tid).put("song",song)){result->
             collectionBusy=false
-            if(!result.optBoolean("ok")){collectionMessage=result.optString("error",context.getString(R.string.request_retry));return@call}
+            if(!result.optBoolean("ok")){collectionMessage=displayError(result.optString("error",context.getString(R.string.request_retry)));return@call}
             val data=result.getJSONObject("data")
             if(data.has("confirmed")&&!data.optBoolean("confirmed")){
                 collectionMessage=context.getString(R.string.song_add_accepted)
-                if(BuildConfig.DEBUG)android.util.Log.i("AuralisCollections","acknowledged; response keys=${data.optJSONArray("responseKeys")}")
                 refreshLibrary();return@call
             }
             collectionMessage=context.getString(if(data.optBoolean("alreadyExists"))R.string.song_already_present else R.string.song_added)
