@@ -1858,9 +1858,11 @@ impl App {
             "transform",
             &format!("translate3d(0,{}px,0)", 72.0 * (1.0 - blend.mini)),
         );
-        if p <= 0.0005 && !self.player {
-            class(&layers.player, "mounted", false);
-        }
+        class(
+            &layers.player,
+            "mounted",
+            motion::sheet_mounted(self.player, p, self.sheet_spring.settled()),
+        );
         let Some(morph) = self.morph else {
             // Reduced motion (or an unmeasurable layout) skips the shared morph but
             // must still reveal the real cover and unmount the closed sheet.
@@ -1896,11 +1898,6 @@ impl App {
             );
             style(&overlay, "border-radius", &format!("{radius:.2}px"));
             style(&overlay, "opacity", "1");
-        }
-        if p <= 0.0005 && !self.player {
-            if let Some(player) = el("player") {
-                class(&player, "mounted", false);
-            }
         }
     }
     fn advance_sheet(&mut self, dt: f64) {

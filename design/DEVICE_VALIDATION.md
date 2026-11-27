@@ -1,3 +1,12 @@
+# v0.5.10-preview 连续开关消失（2026-11-27）
+
+- 先在真实WASM和手机code36复现关闭尾段再次打开后mounted仍false、播放页和mini同时不可见。触发窗口为p约0.00044、绘制已卸载而弹簧尚未settled。
+- Rust改为以动画生命周期确定挂载；WASM覆盖9种间隔，手机code37锁定同一窗口，mounted before/after均true，额外8轮快速开关通过。操作不播放、不换歌、不改偏好，结束后歌曲栏可用。
+- UI32/core44/Java4组、完整构建、原完整WASM交互回归与v2签名通过；数值覆盖60/90/120/144Hz，不作手机GPU帧率声明。
+- 保留数据安装最终APK，手机回读SHA256与本地一致：3F5BBD1CAFC598A0986530FD5E452B553B65C1BB59EFC1E45969E1C9D5F3CECF，16239415字节；私有前后报告/系统截图在device-debug/usb-0510，不公开。9228转发已移除，本轮不发布Release。
+
+---
+
 # v0.5.9-preview 底栏与USB实机验证（2026-11-27）
 
 - 用户连接USB后，确认设备mondrian/23013RK75C、原code35；保留数据安装code36成功。最终手机base.apk与本地包SHA256完全一致：7D67A823C30FDC469AB539A7A93082FB9DA52A5E8F14044DEC34F5631E4A41B3，16465320字节，原证书v2通过。

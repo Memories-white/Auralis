@@ -2,7 +2,38 @@
 
 > 每次改动后更新此表；入口约定已写入根目录 `AGENTS.md`。布局、交互、设置校验和动画以 Rust 为主，Android 只做必要的平台桥接。
 
-## 当前交付 · 0.5.9
+## 当前交付 · 0.5.10
+
+| 项目 | 状态 / 入口 |
+| :-- | :-- |
+| 日期、版本 | 2026-11-27 · 0.5.10-preview · versionCode 37 |
+| 源码基线 | 8493e6b93b1c9fd98084b3e8097ce3af080f5d22，已推送0.5.9 |
+| 当前提交 | 本表随代码提交并推送main，完整SHA用git log -1读取 |
+| APK | APKs/Auralis-v0.5.10-preview.apk · 16239415字节 |
+| SHA256 | 3F5BBD1CAFC598A0986530FD5E452B553B65C1BB59EFC1E45969E1C9D5F3CECF |
+| 安装 / 签名 | 手机保留数据安装code37成功；回读base.apk哈希与本地相同；原签名v2通过 |
+| 发布 | 源码推送main，本轮不创建Release；APK与私有截图仍在忽略目录 |
+
+### 本轮交接表：连续打开退出后消失
+
+| 请求 / 根因 | 改动入口 | 验证 / 限制 |
+| :-- | :-- | :-- |
+| 连续点开歌曲栏、退出后消失 | ui/src/lib.rs::apply_sheet原来在p≤0.0005时就移除mounted，但Spring速度尚未达到settled；此时open_player走反向分支，原先未恢复mounted，mini又被正常淡出，导致两边都看不见 | 先在真实WASM与手机0.5.9复现：尾段p约0.00044，reopen前后mounted均false；不是推测或只凭截图诊断 |
+| 关闭生命周期和反向显示 | ui/src/motion.rs::sheet_mounted；apply_sheet每次按目标打开/进度/弹簧是否结束确定挂载，删除两处按绘制阈值提前卸载的分支 | 关闭尾段仍保持host，真正结束才卸载；即使旧状态未挂载，目标打开时立即恢复。保留原位置和速度，不新增防抖或禁止连续点击，不改协议/登录/媒体 |
+| 数值回归 | motion.rs::closing_tail_keeps_host_and_reopen_always_mounts，覆盖60/90/120/144Hz | UI32/core44/Java4组通过；不同采样率是数值轨迹验证，不代表手机实测刷新率 |
+| 真实WASM | tools/check-player-rapid-toggle.cjs锁定关闭末端窗口，再覆盖0/16/40/85/160/350/500/560/600ms反向操作 | 修改前必现失败，修改后通过；每轮结束mini opacity1、无mounted残留、dock非inert、无shared-artwork；原完整check-rust-ui回归通过 |
+| 手机验证 | tools/check-device-rapid-toggle.cjs使用用户已授权的自身WebView端口，不播放、不换歌、不改偏好 | 旧code36同一断言失败；新code37尾段p约0.000432，mounted before/after均true；额外8轮快速开关通过。系统截图确认歌曲栏与按钮恢复；账号、歌曲和队列保留 |
+| 交付 / 清理 | 完整Rust/WASM/NDK/Gradle构建与v2签名；adb install -r；回读安装包核对 | 最终包哈希相同；临时9228转发已移除。用户私有截图与前后JSON在device-debug/usb-0510，不公开；不声称所有其他BUG已消除 |
+
+### 后续提示
+
+- 若再出现显示异常，优先区分paint阈值与animation/lifecycle终态，禁止重新加入p≤阈值即卸载的路径。
+- 本轮只修复消失竞态，没有改变既有Miuix/Melox视觉参数。继续保留Rust布局/动画原则，修改后更新表格。
+- 手机当前已安装code37；下一次核对实时ADB连接与版本即可，不需要清数据或重新登录。
+
+---
+
+## 0.5.9 历史交付
 
 | 项目 | 状态 / 入口 |
 | :-- | :-- |

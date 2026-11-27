@@ -66,6 +66,11 @@ pub fn sheet_blend(progress: f64) -> SheetBlend {
         mini_above: p > 0.0 && p < 0.3,
     }
 }
+/// A paint threshold is not a lifecycle endpoint. Keep the host throughout the
+/// spring tail so a reversal can never animate a hidden full-player surface.
+pub fn sheet_mounted(open: bool, progress: f64, settled: bool) -> bool {
+    open || !settled || progress > 0.0005
+}
 
 impl Spring {
     /// Move the target without touching the current position or velocity, so an
@@ -151,6 +156,22 @@ pub fn length(value: &str, relative: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn closing_tail_keeps_host_and_reopen_always_mounts() {
+        assert!(sheet_mounted(false, 0.00044, false));
+        assert!(sheet_mounted(true, 0.0, true));
+        assert!(sheet_mounted(false, 0.0, false));
+        assert!(!sheet_mounted(false, 0.0, true));
+        for hz in [60, 90, 120, 144] {
+            let mut spring = Spring::default();
+            spring.place(1.0);
+            spring.to(0.0);
+            for _ in 0..hz {
+                let p = spring.sample(1.0 / hz as f64, Feel::SHEET);
+                assert_eq!(sheet_mounted(false, p, spring.settled()), !spring.settled());
+            }
+        }
+    }
     #[test]
     fn return_hands_off_foreground_before_the_surface_lands() {
         let end = sheet_blend(0.0);
