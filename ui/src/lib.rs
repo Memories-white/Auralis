@@ -115,6 +115,9 @@ struct App {
     effect_stamp: i32,
     ambient_phase: f64,
     wash_transform: String,
+    player_markup: String,
+    player_identity: String,
+    player_layout: String,
     last_load: f64,
     pointer: Option<(f64, f64, String)>,
     suppress_click: f64,
@@ -566,6 +569,7 @@ pub fn update(input: &str) {
                 }
             }
             "playback" => {
+                let had_track = !s(&app.live, "mid").is_empty();
                 let identity = s(&app.live, "mid") != s(&packet["state"], "mid");
                 let toggle = b(&app.live, "playing") != b(&packet["state"], "playing");
                 let controls = [
@@ -585,7 +589,15 @@ pub fn update(input: &str) {
                         app.mini_until = now() + 4500.0;
                     }
                     if identity {
-                        app.cover_flip_until = now() + 720.0;
+                        app.cover_flip_until = if had_track
+                            && app.player
+                            && app.sheet_spring.settled()
+                            && app.player_page == 1
+                        {
+                            now() + 720.0
+                        } else {
+                            0.0
+                        };
                         app.active_line = None;
                         if matches!(app.sheet.as_str(), "song-actions" | "add-playlist") {
                             app.sheet.clear();
@@ -1270,15 +1282,20 @@ impl App {
         }
     }
     fn paint_player(&mut self) {
-        self.wash_transform.clear();
         let old_scroll = el("lyric-viewport")
             .and_then(|e| e.dyn_into::<HtmlElement>().ok())
             .map(|e| e.scroll_top())
             .unwrap_or(0);
         let mid = s(&self.live, "mid");
         let timeline = s(&self.data, "lyrics");
-        let identity = format!("{mid}:{timeline}:{}", s(&self.data, "wordLyrics"));
-        if self.lyric_mid != identity {
+        let identity = format!(
+            "{mid}:{timeline}:{}:{}:{}",
+            s(&self.data, "wordLyrics"),
+            s(&self.data, "translation"),
+            s(&self.data, "lyricState")
+        );
+        let document_changed = self.lyric_mid != identity;
+        if document_changed {
             self.lines = parse_lrc(timeline);
             self.translations = parse_lrc(s(&self.data, "translation"));
             self.word_lines = karaoke::parse(s(&self.data, "wordLyrics"), &self.lines);
@@ -1288,24 +1305,93 @@ impl App {
             self.row_motion.clear();
             self.lyric_scroll = 0.0;
         }
-        set_html(
-            "player",
-            &render::player(
-                &self.live,
-                &self.data,
-                &self.lines,
-                &self.translations,
-                &self.word_lines,
-                self.player_page == 2,
-            ),
+        let player_identity = format!("{}|{}", mid, s(&self.live, "cover"));
+        let retained = self.player_identity == player_identity && el("cover-art").is_some();
+        let layout = self.data["uiPreferences"].to_string();
+        let layout_changed = self.player_layout != layout;
+        let render_lyrics = self.player_page == 2 || (retained && self.lyrics_mounted);
+        let html = render::player(
+            &self.live,
+            &self.data,
+            &self.lines,
+            &self.translations,
+            &self.word_lines,
+            render_lyrics,
         );
-        self.lyrics_mounted = self.player_page == 2;
-        self.cache_lyric_nodes();
-        self.lyric_dirty = true;
-        self.active_line = None;
-        if let Some(viewport) = el("lyric-viewport").and_then(|e| e.dyn_into::<HtmlElement>().ok())
-        {
-            viewport.set_scroll_top(old_scroll);
+        if self.player_markup == html && !document_changed && !layout_changed {
+            self.show_player_page();
+            self.cache_sheet_layers();
+            self.apply_sheet(self.sheet_spring.position);
+            self.paint_progress();
+            return;
+        }
+        if retained {
+            // The persistent cover, background, pager and lyric viewport must not
+            // lose transforms/decoded images when only controls or lyrics change.
+            if let Ok(staging) = doc().create_element("div") {
+                let chrome = if render_lyrics {
+                    render::player(
+                        &self.live,
+                        &self.data,
+                        &self.lines,
+                        &self.translations,
+                        &self.word_lines,
+                        false,
+                    )
+                } else {
+                    html.clone()
+                };
+                staging.set_inner_html(&chrome);
+                for selector in [
+                    ".player-footer>.transport",
+                    ".player-tools",
+                    ".playback-error",
+                    ".lyric-options",
+                    ".information-pane",
+                    ".player-identity h2",
+                    ".player-identity p",
+                ] {
+                    if let (Ok(Some(next)), Some(current)) = (
+                        staging.query_selector(selector),
+                        find(&format!("#player {selector}")),
+                    ) {
+                        let markup = next.inner_html();
+                        if current.inner_html() != markup {
+                            current.set_inner_html(&markup);
+                        }
+                    }
+                }
+                if document_changed && render_lyrics {
+                    set_html(
+                        "lyric-lines",
+                        &render::lyrics(
+                            &self.lines,
+                            &self.translations,
+                            &self.word_lines,
+                            &self.data,
+                        ),
+                    );
+                }
+            }
+            artwork::invalidate_markup("player");
+        } else {
+            self.wash_transform.clear();
+            set_html("player", &html);
+        }
+        self.player_markup = html;
+        self.player_identity = player_identity;
+        self.player_layout = layout;
+        self.lyrics_mounted = render_lyrics;
+        if !retained || document_changed || layout_changed {
+            self.cache_lyric_nodes();
+            self.lyric_dirty = true;
+            self.active_line = None;
+            self.lyric_height = 0;
+            if let Some(viewport) =
+                el("lyric-viewport").and_then(|e| e.dyn_into::<HtmlElement>().ok())
+            {
+                viewport.set_scroll_top(if retained { old_scroll } else { 0 });
+            }
         }
         self.show_player_page();
         self.cache_sheet_layers();
@@ -1761,6 +1847,10 @@ impl App {
             return;
         }
         self.player_page = 1;
+        self.cover_flip_until = 0.0;
+        if let Some(cover) = el("cover-art") {
+            style(&cover, "transform", "none");
+        }
         self.pager.place(1.0);
         self.pager.to(1.0);
         self.pager_dragging = false;
@@ -2296,7 +2386,11 @@ impl App {
                 self.wash_transform = transform;
             }
         }
-        if self.player && self.cover_flip_until > 0.0 {
+        if self.player
+            && self.sheet_spring.settled()
+            && self.morph.is_none()
+            && self.cover_flip_until > 0.0
+        {
             if let Some(cover) = el("cover-art") {
                 let p = ((self.cover_flip_until - time) / 720.0).clamp(0.0, 1.0);
                 let wave = if self.reduced || customization::get(&self.data, "coverFlip") == "off" {

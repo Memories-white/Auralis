@@ -2,7 +2,38 @@
 
 > 每次改动后更新此表；入口约定已写入根目录 `AGENTS.md`。布局、交互、设置校验和动画以 Rust 为主，Android 只做必要的平台桥接。
 
-## 当前交付 · 0.5.10
+## 当前交付 · 0.5.11
+
+| 项目 | 状态 / 入口 |
+| :-- | :-- |
+| 日期、版本 | 2026-11-27 · 0.5.11-preview · versionCode 38 |
+| 源码基线 | bddc639ffb69d93aa11d0c3321fc7efc36f7323d，已推送0.5.10 |
+| 当前提交 | 本表随代码提交并推送main，完整SHA用git log -1读取 |
+| APK | APKs/Auralis-v0.5.11-preview.apk · 16241131字节 |
+| SHA256 | 14950FEA0E98B5384FA03BE59B2C5D8E79A5A3B7C0972F95F0B94BCEBF898408 |
+| 安装 / 签名 | 保留数据安装code38；回读base.apk哈希一致；原证书v2通过 |
+| 发布 | 源码推送main，不创建Release；APK和个人设备截图均不提交 |
+
+### 本轮交接表：动画跳变与打开封面闪烁
+
+| 请求 / 根因 | 改动入口 | 验证 / 限制 |
+| :-- | :-- | :-- |
+| 恢复上次歌曲触发切歌翻转，与共享展开叠加 | ui/src/lib.rs::update/open_player/frame：仅已有歌曲且播放页封面稳定显示时启动翻转；新展开取消旧翻转，共享转场期间不驱动翻转 | check-player-stability.cjs修改前捕获恢复歌曲在展开时rotateY/scale；修改后通过。没有删除正常切歌动效 |
+| 控制/歌词更新重建整块播放器，打断背景、封面和歌词运动 | lib.rs::paint_player：同曲复用封面、背景、pager及歌词viewport；只替换改变的控制区和歌词内容。artwork.rs::invalidate_markup同步根缓存，不清图片资源 | 修改前WASM四项失败：恢复翻转、播放暂停重挂封面、暂停重挂歌词、延迟歌词重挂全页；修改后全部通过。旧code37手机切换译文也证实封面节点被替换 |
+| 迟到译文及歌词容器尺寸 | 歌词文档identity纳入translation/lyricState；实际更换歌词后清尺寸缓存重新初始化padding；同曲普通刷新保持活动行和动画状态 | 真实WASM验证延迟译文显示、原封面/viewport仍在；本轮没有改歌词时间协议或逐字曲线 |
+| 自动回归 | tools/check-player-stability.cjs、check-player-rapid-toggle.cjs、check-player-handoff.cjs、check-rust-ui.cjs | 最终WASM全部通过，包含9种快速间隔、反向/触摸/关闭时刷新/减少动态、完整UI回归；UI32/core44/Java4组及完整WASM/NDK/Gradle构建通过 |
+| USB实机 | tools/check-device-player-stability.cjs、check-device-rapid-toggle.cjs；应用自身WebView与系统截图 | code38切换译文后cover/wash/pager/viewport/活动行均保留，3次warm reopen保留封面；关闭尾段和8轮快速开关通过，系统截图歌曲栏正常。译文恢复原设置，未清数据/换歌/改队列；临时9228转发已移除 |
+| 验证边界 | 私有报告device-debug/usb-0511、旧版失败stability-before.json；快速开关报告沿用usb-0510目录 | 旧code37尝试播放当前曲目即提示账号/权益错误，因此本轮实机稳定性使用译文切换，不宣称真实连续播放通过。未改登录/协议，不作手机GPU帧率或所有闪烁均消除的结论 |
+
+### 下一位AI
+
+- 手机当前code38，继续先核对实时USB和版本。保留用户账号与歌曲数据。
+- 同曲被动刷新不得退回整块player innerHTML；真正歌曲/封面身份改变仍需完整交接。
+- 连续开关必须保留0.5.10的sheet_mounted生命周期修复；新旧回归一起运行。
+
+---
+
+## 0.5.10 历史交付
 
 | 项目 | 状态 / 入口 |
 | :-- | :-- |

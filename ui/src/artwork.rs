@@ -115,6 +115,11 @@ pub fn source(url: &str, avatar: bool) -> String {
             .unwrap_or_default()
     )
 }
+pub fn invalidate_markup(id: &str) {
+    IMAGES.with(|state| {
+        state.borrow_mut().markup.remove(id);
+    });
+}
 fn images(root: &Element) -> Vec<HtmlImageElement> {
     root.query_selector_all("img[data-art-src]")
         .ok()
