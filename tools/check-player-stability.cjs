@@ -3,8 +3,8 @@ const assets=path.resolve(__dirname,'../android/app/src/main/assets/ui');
 const song={mid:'stable-cover',title:'A calm cover',artist:'Motion study',duration:180,coverUrl:'https://example.invalid/cover'};
 const state={page:'home',currentSong:song,queue:[song],tracks:[],likes:[],recent:[],discovery:[],recommendations:[],playlists:[],history:[],artists:[],counts:{},safeTop:24,safeBottom:16,uiPreferences:{coverFlip:'on',background:'flow'},lyrics:'[00:00.000]A calm cover\n[00:05.000]Stay in place',translation:'',wordLyrics:'[]',lyricState:'ready',colors:{bg:'#141414',card:'#242424',fg:'#f2f2f2',muted:'#96979b',primary:'#91b6ff',border:'#3d3e42'}};
 const live={mid:song.mid,title:song.title,artist:song.artist,cover:song.coverUrl,playing:false,position:6000,duration:180000};
-(async()=>{const browser=await chromium.launch({headless:true});try{const p=await browser.newPage({viewport:{width:411,height:914}}),failures=[];
- await p.addInitScript(()=>{window.AuralisNative={postMessage:()=>{}}});await p.route('**/*',r=>{const u=new URL(r.request().url());if(u.pathname==='/artwork')return r.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500"><path fill="#789" d="M0 0h500v500H0z"/></svg>'});const f=path.resolve(assets,'.'+u.pathname);assert.ok(f.startsWith(assets+path.sep));return r.fulfill({contentType:f.endsWith('.wasm')?'application/wasm':f.endsWith('.js')?'text/javascript':'text/html',body:fs.readFileSync(f)});});
+(async()=>{const browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE});try{const p=await browser.newPage({viewport:{width:411,height:914},isMobile:true,hasTouch:true}),failures=[];
+ await p.addInitScript(()=>{window.__rateChanges=[];window.AuralisNative={postMessage:value=>{const event=JSON.parse(value);if(event.type==='transport')window.__transport=event.action;if(event.type==='animation_rate')window.__rateChanges.push(event.active);}}});await p.route('**/*',r=>{const u=new URL(r.request().url());if(u.pathname==='/artwork')return r.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500"><path fill="#789" d="M0 0h500v500H0z"/></svg>'});const f=path.resolve(assets,'.'+u.pathname);assert.ok(f.startsWith(assets+path.sep));return r.fulfill({contentType:f.endsWith('.wasm')?'application/wasm':f.endsWith('.js')?'text/javascript':'text/html',body:fs.readFileSync(f)});});
  await p.goto('https://auralis.local/index.html');await p.waitForFunction(()=>window.auralisUpdate);
  const content=()=>p.evaluate(state=>auralisUpdate(JSON.stringify({type:'content',state})),state),pulse=()=>p.evaluate(state=>auralisUpdate(JSON.stringify({type:'playback',state})),live);
  await content();await pulse();await p.locator('#mini-player .mini-meta').click();await p.waitForTimeout(100);
@@ -12,9 +12,31 @@ const live={mid:song.mid,title:song.title,artist:song.artist,cover:song.coverUrl
  await p.waitForTimeout(750);await p.locator('#cover-art').evaluate(e=>{window.__cover=e;window.__wash=document.querySelector('.player-wash');window.__pane=document.querySelector('#player-pages');});
  live.playing=true;await pulse();const retained=await p.evaluate(()=>({cover:window.__cover===document.querySelector('#cover-art'),wash:window.__wash===document.querySelector('.player-wash'),pane:window.__pane===document.querySelector('#player-pages')}));if(!Object.values(retained).every(Boolean))failures.push('Play/pause recreates the cover, background or pager');
  await p.locator('[data-action=player_lyrics]').click();await p.waitForTimeout(650);await p.locator('#lyric-viewport').evaluate(e=>{window.__lyricViewport=e;window.__lyricLine=document.querySelector('#lyric-1');window.__beforePadding=document.querySelector('#lyric-lines').style.paddingTop;});
- live.playing=false;await pulse();if(!await p.evaluate(()=>window.__lyricViewport===document.querySelector('#lyric-viewport')&&window.__lyricLine===document.querySelector('#lyric-1')))failures.push('Pausing remounts the lyric viewport/rows');
+ const transport = p.locator('#player .play-control');
+ const button = await transport.elementHandle();
+ await p.evaluate(()=>{window.__rateChanges.length=0;});
+ const baseline = await p.locator('#lyric-viewport').evaluate(e=>e.getBoundingClientRect().left);
+ for (const playing of [false, true]) {
+   await transport.tap();
+   assert.equal(await p.evaluate(()=>window.__transport),playing?'RESUME':'PAUSE');
+   live.playing=playing;await pulse();
+   if(!await button.evaluate(e=>e.isConnected)) failures.push('Playback state replaces the focused play control');
+   const samples = await p.evaluate(async()=>{
+     const frames=[];
+     for(let i=0;i<16;i++){
+       await new Promise(requestAnimationFrame);
+       frames.push(document.querySelector('#lyric-viewport').getBoundingClientRect().left);
+     }
+     return frames;
+   });
+   const delta = Math.max(...samples.map(value=>Math.abs(value-baseline)));
+   if(delta>1)failures.push(`${playing?'Resuming':'Pausing'} moves lyrics horizontally by ${delta.toFixed(2)}px`);
+ }
+ const rateChanges=await p.evaluate(()=>window.__rateChanges);
+ if(rateChanges.length) failures.push(`Play/pause changes the native window frame-rate preference: ${rateChanges.join(', ')}`);
+ if(!await p.evaluate(()=>window.__lyricViewport===document.querySelector('#lyric-viewport')&&window.__lyricLine===document.querySelector('#lyric-1')))failures.push('Play/pause remounts the lyric viewport/rows');
  state.lyrics+='\n[00:10.000]A late line';state.translation='[00:05.000]仍在原处';await content();if(!await p.evaluate(()=>window.__lyricViewport===document.querySelector('#lyric-viewport')&&window.__cover===document.querySelector('#cover-art')))failures.push('Late lyrics recreate the full player');
  await p.waitForTimeout(100);assert.ok((await p.locator('#lyric-1').innerText()).includes('仍在原处'));
  await p.evaluate(()=>auralisBack());await p.waitForTimeout(800);await p.locator('#mini-player .mini-meta').click();await p.waitForTimeout(750);assert.equal(await p.locator('#player').evaluate(e=>e.classList.contains('mounted')),true);
- assert.deepEqual(failures,[]);console.log('PASS: opening pose has no restore flip; controls, late lyrics and warm reopen retain cover/background/pager/lyric hosts.');
+ assert.deepEqual(failures,[]);console.log('PASS: stable lyric position, playback control and frame-rate preference during touch play/pause; cover, background and lyric hosts stay mounted.');
 }finally{await browser.close()}})().catch(e=>{console.error(e);process.exitCode=1});

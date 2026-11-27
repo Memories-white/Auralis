@@ -582,6 +582,9 @@ pub fn update(input: &str) {
                 ]
                 .iter()
                 .any(|key| app.live[key] != packet["state"][key]);
+                let metadata_changed = ["title", "artist", "cover"]
+                    .iter()
+                    .any(|key| app.live[key] != packet["state"][key]);
                 app.live = packet["state"].clone();
                 app.clock_at = now();
                 if identity || toggle || controls {
@@ -607,7 +610,11 @@ pub fn update(input: &str) {
                     }
                     app.paint_mini();
                     if app.player {
-                        app.paint_player();
+                        if identity || controls || metadata_changed {
+                            app.paint_player();
+                        } else {
+                            app.paint_play_control();
+                        }
                     }
                 }
                 app.paint_progress();
@@ -1281,6 +1288,17 @@ impl App {
             self.apply_sheet(self.sheet_spring.position);
         }
     }
+    fn paint_play_control(&self) {
+        let Some(button) = find("#player .player-footer .play-control") else {
+            return;
+        };
+        let glyph = render::play_glyph(&self.live);
+        let label = labels::label(glyph);
+        if button.get_attribute("aria-label").as_deref() != Some(label.as_str()) {
+            let _ = button.set_attribute("aria-label", &label);
+            button.set_inner_html(&icons::icon(glyph));
+        }
+    }
     fn paint_player(&mut self) {
         let old_scroll = el("lyric-viewport")
             .and_then(|e| e.dyn_into::<HtmlElement>().ok())
@@ -1343,7 +1361,6 @@ impl App {
                 };
                 staging.set_inner_html(&chrome);
                 for selector in [
-                    ".player-footer>.transport",
                     ".player-tools",
                     ".playback-error",
                     ".lyric-options",
@@ -1373,6 +1390,7 @@ impl App {
                     );
                 }
             }
+            self.paint_play_control();
             artwork::invalidate_markup("player");
         } else {
             self.wash_transform.clear();
@@ -2352,7 +2370,8 @@ impl App {
             || !self.overlay_spring.settled()
             || self.sheet_drag.is_some()
             || (self.player && (!self.pager.settled() || self.pager_dragging))
-            || (self.player && self.player_page == 2 && b(&self.live, "playing"));
+            // Keep Android's window refresh preference stable while the same lyric page is visible.
+            || (self.player && self.player_page == 2 && !self.reduced);
         if animating != self.animation_vote {
             self.animation_vote = animating;
             post(json!({"type":"animation_rate","active":animating}));

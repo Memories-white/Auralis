@@ -306,11 +306,20 @@ fn seek() -> String {
 fn times() -> String {
     "<div class=times><span data-time=position>00:00</span><span data-time=duration>00:00</span></div>".into()
 }
+pub fn play_glyph(live: &Value) -> &'static str {
+    if b(live, "playing") {
+        "pause"
+    } else {
+        "play"
+    }
+}
+
 fn transport(live: &Value, mini: bool) -> String {
+    let glyph = play_glyph(live);
     let play = action(
         "play",
-        &label(if b(live, "playing") { "pause" } else { "play" }),
-        if b(live, "playing") { "pause" } else { "play" },
+        &label(glyph),
+        glyph,
         "play-control",
     );
     format!(
