@@ -21,6 +21,8 @@ class MusicState(private val context:Context,private val protocol:(String,String
     private val worker=Executors.newSingleThreadExecutor()
     private val feedWorker=Executors.newSingleThreadExecutor()
     private val detailWorker=Executors.newSingleThreadExecutor()
+    /** Songs requested per playlist page; the page keeps loading while the user scrolls. */
+    private val trackPageSize=100
     private val ui=Handler(Looper.getMainLooper())
     private val secure=SecureStore(context)
     private val prefs=context.getSharedPreferences("library",Context.MODE_PRIVATE)
@@ -51,6 +53,10 @@ class MusicState(private val context:Context,private val protocol:(String,String
     var detailRevision by mutableIntStateOf(0)
     var detailLoading by mutableStateOf(false)
     var detailError by mutableStateOf("")
+    /** Songs the service reports for the open playlist, not just the loaded page. */
+    var detailTotal by mutableIntStateOf(0)
+    var detailHasMore by mutableStateOf(false)
+    var detailLoadingMore by mutableStateOf(false)
     private data class DetailRequest(val kind:String,val id:Long,val dirid:Long,val title:String,val cover:String,val excluded:List<String> = emptyList())
     private var detailRequest:DetailRequest?=null
     private val backStack=mutableListOf<String>()
@@ -129,7 +135,7 @@ class MusicState(private val context:Context,private val protocol:(String,String
     private fun call(name:String,args:JSONObject=JSONObject(),done:(JSONObject)->Unit){
         val expected=epoch
         val input=args.toString()
-        (when(name){"recommend"->feedWorker;"guess","playlist"->detailWorker;else->worker}).execute{
+        (when(name){"recommend"->feedWorker;"guess","playlist","playlist_page","playlist_all"->detailWorker;else->worker}).execute{
             val response=runCatching{JSONObject(protocol(name,input))}.getOrElse{JSONObject().put("ok",false).put("error",it.message?:context.getString(R.string.request_failed))}
             ui.post{if(alive&&expected==epoch)done(response)}
         }
@@ -187,9 +193,9 @@ class MusicState(private val context:Context,private val protocol:(String,String
         page=destination;status="";busy=false
         if(destination=="mine"&&loggedIn&&(library.length()==0||libraryFromCache))refreshLibrary()
     }
-    private fun cancelDetail(){detailLoading=false;detailError="";detailRequest=null}
+    private fun cancelDetail(){detailLoading=false;detailError="";detailRequest=null;detailHasMore=false;detailLoadingMore=false;detailTotal=0}
     fun back(){playlistGeneration++;searchGeneration++;cancelDetail();page=if(backStack.isNotEmpty())backStack.removeAt(backStack.lastIndex)else "home";status="";busy=false}
-    fun openSongs(songs:List<JSONObject>,label:String,cover:String=""){playlistGeneration++;cancelDetail();if(page!="songs")parentPage=page;detailTitle=label;detailCover=cover.ifBlank{songs.firstOrNull()?.artwork().orEmpty()};tracks=songs;detailRevision++;navigate("songs")}
+    fun openSongs(songs:List<JSONObject>,label:String,cover:String=""){playlistGeneration++;cancelDetail();if(page!="songs")parentPage=page;detailTitle=label;detailCover=cover.ifBlank{songs.firstOrNull()?.artwork().orEmpty()};tracks=songs;detailTotal=songs.size;detailRevision++;navigate("songs")}
     fun daily(){
         val songs=home.optJSONArray("daily")?.objects().orEmpty()
         if(songs.isNotEmpty())openSongs(songs,context.getString(R.string.daily_mix))
@@ -217,20 +223,86 @@ class MusicState(private val context:Context,private val protocol:(String,String
             detailLoading=false;detailError=context.getString(R.string.playlist_invalid);return
         }
         val args=JSONObject().put("session",session).put("id",source.id).put("dirid",source.dirid).put("exclude",JSONArray(source.excluded))
+        if(source.kind=="playlist")args.put("offset",0).put("size",trackPageSize)
+        val command=if(source.kind=="playlist")"playlist_page" else source.kind
         if(BuildConfig.DEBUG)android.util.Log.d("AuralisPlaylist","open kind=${source.kind} generation=$request")
-        call(source.kind,args){result->
+        call(command,args){result->
             if(request!=playlistGeneration||page!="songs"||detailRequest!=source)return@call
             detailLoading=false
             if(!result.optBoolean("ok")){
                 detailError=displayError(result.optString("error",context.getString(R.string.request_retry)))
+            }else if(source.kind=="playlist"){
+                val payload=result.optJSONObject("data")
+                val songs=payload?.optJSONArray("songs")
+                if(payload==null||songs==null){detailError=context.getString(R.string.playlist_response_invalid);return@call}
+                tracks=songs.objects()
+                detailTotal=payload.optInt("total",tracks.size)
+                detailHasMore=payload.optBoolean("hasMore")
+                if(detailCover.isBlank())detailCover=tracks.firstOrNull()?.artwork().orEmpty()
+                detailRevision++
+                if(BuildConfig.DEBUG)android.util.Log.d("AuralisPlaylist","loaded kind=${source.kind} count=${tracks.size} total=$detailTotal more=$detailHasMore generation=$request")
             }else{
                 val songs=result.optJSONArray("data")
                 if(songs==null){detailError=context.getString(R.string.playlist_response_invalid);return@call}
                 tracks=songs.objects()
+                detailTotal=tracks.size
+                detailHasMore=false
                 if(detailCover.isBlank())detailCover=tracks.firstOrNull()?.artwork().orEmpty()
                 if(BuildConfig.DEBUG)android.util.Log.d("AuralisPlaylist","loaded kind=${source.kind} count=${tracks.size} generation=$request")
             }
         }
+    }
+    /** Fetch the next page for the open playlist instead of stopping at the first 100. */
+    fun loadMoreTracks(){
+        val source=detailRequest?:return
+        if(source.kind!="playlist"||!detailHasMore||detailLoading||detailLoadingMore||page!="songs")return
+        val request=playlistGeneration
+        detailLoadingMore=true
+        val args=JSONObject().put("session",session).put("id",source.id).put("dirid",source.dirid)
+            .put("offset",tracks.size).put("size",trackPageSize)
+        call("playlist_page",args){result->
+            if(request!=playlistGeneration||page!="songs"||detailRequest!=source)return@call
+            detailLoadingMore=false
+            if(!result.optBoolean("ok")){
+                detailHasMore=false
+                detailError=displayError(result.optString("error",context.getString(R.string.request_retry)))
+                return@call
+            }
+            val payload=result.optJSONObject("data")?:return@call
+            val more=payload.optJSONArray("songs")?.objects().orEmpty()
+            if(more.isNotEmpty())tracks=tracks+more
+            detailTotal=payload.optInt("total",detailTotal.coerceAtLeast(tracks.size))
+            detailHasMore=payload.optBoolean("hasMore")&&more.isNotEmpty()
+            detailRevision++
+        }
+    }
+    /** Resolve every page of the open playlist, then start playback or shuffle. */
+    fun playAllTracks(shuffle:Boolean){
+        val source=detailRequest
+        if(source==null||page!="songs"||source.kind!="playlist"||!detailHasMore){
+            startTracks(tracks,shuffle);return
+        }
+        if(busy)return
+        busy=true;status=context.getString(R.string.loading_playlist)
+        val request=playlistGeneration
+        val args=JSONObject().put("session",session).put("id",source.id).put("dirid",source.dirid)
+        call("playlist_all",args){result->
+            if(request!=playlistGeneration||page!="songs"||detailRequest!=source){busy=false;status="";return@call}
+            busy=false;status=""
+            if(!result.optBoolean("ok")){
+                detailError=displayError(result.optString("error",context.getString(R.string.request_retry)))
+                return@call
+            }
+            val songs=result.optJSONArray("data")?.objects().orEmpty()
+            if(songs.isNotEmpty()){
+                tracks=songs;detailTotal=songs.size;detailHasMore=false;detailRevision++
+            }
+            startTracks(if(songs.isNotEmpty())songs else tracks,shuffle)
+        }
+    }
+    private fun startTracks(rows:List<JSONObject>,shuffle:Boolean){
+        if(rows.isEmpty())return
+        if(shuffle){choosePlaybackMode("SHUFFLE");play(rows,rows.indices.random())}else play(rows,0)
     }
     fun retryPlaylist(){if(!detailLoading)detailRequest?.let(::loadDetail)}
     fun search(){

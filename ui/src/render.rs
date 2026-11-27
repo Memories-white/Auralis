@@ -226,8 +226,31 @@ fn node(v: &Value, data: &Value, live: &Value, parent_enabled: bool) -> String {
         "songs"=>{
             let id=s(v,"source");let start=n(v,"start").max(0)as usize;let limit=n(v,"limit");
             let visible=if limit>0{limit as usize}else{data["visibleLimit"].as_u64().unwrap_or(100)as usize};
+            let loaded=source(data,id).len();
             let mut rows=source(data,id).iter().enumerate().skip(start).take(visible).map(|(index,song)|song_row(song,id,index,s(song,"mid")==s(live,"mid"))).collect::<String>();
-            if limit<=0&&source(data,id).len()>start+visible{rows.push_str(&format!("<div class=local-more>{}</div>",button("local_more","load_more_songs",false)));}rows
+            if limit<=0{
+                let rendered=(start+visible).min(loaded);
+                let render_pending=loaded>rendered;
+                let fetch_pending=b(data,"detailHasMore");
+                if render_pending||fetch_pending{
+                    // The page loads another service page when the rendered batch is
+                    // exhausted, so long playlists are never silently capped.
+                    let loading=b(data,"detailLoadingMore")||b(data,"detailLoading");
+                    let total=n(data,"detailTotal").max(loaded as i32);
+                    let note=if total as usize>loaded{
+                        format!("<span class=more-note>{}</span>",esc(&text(&json!({"resource":"songs_loaded","args":[loaded,total]}))))
+                    }else{
+                        String::new()
+                    };
+                    let control=if loading{
+                        format!("<span class=more-loading><i class=spinner></i>{}</span>",esc(&label("loading_more_songs")))
+                    }else{
+                        button("local_more","load_more_songs",false)
+                    };
+                    rows.push_str(&format!("<div class=local-more>{note}{control}</div>"));
+                }
+            }
+            rows
         }
         "playlists"=>{
             let filter=s(v,"filter");let id=s(v,"source");

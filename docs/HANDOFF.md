@@ -6,17 +6,37 @@
 
 | 项目 | 状态 / 入口 |
 | :-- | :-- |
-| 日期、版本 | 2026-11-27 · `0.5.0-preview` · versionCode `27` |
-| 基线 | `e84bf3b` · 0.4.5-preview，封面复用与启动恢复 |
+| 日期、版本 | 2026-11-27 · `0.5.1-preview` · versionCode `28` |
+| 基线 | `571b865` · 0.5.0-preview，共享封面动效与 Melox 式底栏 |
 | 当前提交 | 本文与本次实现同一个提交；使用 `git log -1` 获取完整 SHA，避免文档自引用哈希 |
-| 最新本地包 | `APKs/Auralis-v0.5.0-preview.apk` |
-| APK SHA256 | `7192F0542DADA846BE85C002D9999F8191FFB744C0B423FC24B2E7C6B39C571E` |
-| 包体 | 16010979 字节；`apksigner verify` v2 通过（debug 证书） |
+| 最新本地包 | `APKs/Auralis-v0.5.1-preview.apk` |
+| APK SHA256 | `8C1E484662A4510D221A01104D2425C20EE4011E37C4DE4028C8CA375D4A6A78` |
+| 包体 | 16023055 字节；`apksigner verify` v2 通过（debug 证书） |
 | 仓库 | [Memories-white/Auralis](https://github.com/Memories-white/Auralis) · public |
 | 已发布版本 | GitHub Release 与主分支分开管理；本次不自动创建 Release |
 | 当前界面架构 | Rust/WASM + Android WebView；不要恢复 Kotlin 页面或增加 JS 动画控制器 |
 
 ## 本次改动交接表
+
+| 需求 / 根因 | 修复行为与源码入口 | 验证 / 后续 |
+| :-- | :-- | :-- |
+| 歌单只显示 100 首 | 根因是 `core/src/lib.rs::playlist` 固定 `song_begin=0 / song_num=100`（disstid）与 `offset=0 / size=100`（dirid），列表数据源本身只有首页。新增 `playlist_page`（单页：`songs/total/hasMore/nextOffset`，total 依次读取 `total_song_num`、`songnum`、`total` 等键）与 `playlist_all`（显式播放全部时按页取完，带 3000 首 / 40 页安全上限并按 mid 去重，防止服务忽略 offset 时死循环） | core 单测覆盖 total 解析、每页剩余数、去重/无进展/上限停止；浏览器检查以 700 首夹具验证头部显示真实总数 |
+| 歌词/歌单页要显示"该是多少首就多少首" | Android 侧 `MusicState` 新增 `detailTotal/detailHasMore/detailLoadingMore`，`loadDetail` 首屏取 100 首并记录服务端总数，滚动到底调用 `loadMoreTracks()` 追加；`RustWebView.kt` 发布这些字段并处理 `load_more_tracks`，`counts.tracks` 用服务端总数而不是已加载数量 | 浏览器检查：头部 "700 首"、首屏 100 行、点击/滚动触发 `load_more_tracks`、追加后渲染更多行、取完后不再请求 |
+| 播放全部 / 随机播放不应只播已加载的 100 首 | Rust 改发 `play_all`（含 shuffle 标记），Android `playAllTracks()` 在 `detailHasMore` 时先通过 `playlist_all` 取完整曲目再入队；取完失败保留当前列表并显示错误 | 浏览器检查断言 `play_all` 的 shuffle 标记；core 测试覆盖取全逻辑 |
+| 我喜欢的音乐同样只有 100 首 | `library` 的 likes 仍只取首页做预览与数量，但 `open_collection` 打开 likes 改为 `playlist(0,201,…)` 走同一分页接口，`counts.likes` 改用 library 返回的真实 total | 无账号时无法实机验证真实 total，逻辑与歌单共用同一分页路径；实机打开喜欢列表需复核 |
+| 分批渲染与自动加载 | `render.rs` 的歌曲节点在"已加载未渲染"或"服务端还有更多"时输出本地加载区（显示"已加载 X / Y 首"、加载中状态或继续加载按钮）；`lib.rs::render_pending/scrolled/local_more` 先扩展已取到的行，再在滚动到底时请求下一页，保留滚动位置 | 浏览器检查先渲染 100 行，追加数据后滚动会渲染更多；多歌单/推荐列表仍按 100 行批次扩展，不一次性创建上千 DOM 节点 |
+| 范围与边界 | 没有改动协议鉴权、播放地址与缓存策略；分页大小 100 与既有接口一致。服务不返回 total 时以"满页即可能还有"推进，空页或重复页立即停止 | 真实账号下 700+ 歌单的接口页大小、total 键名与限速仍需实机验证；真机未连接 |
+
+## 0.5.1 验证表
+
+| 检查 | 结果 |
+| :-- | :-- |
+| 构建与签名 | `build.ps1 -Offline` 完整成功（UI WASM + NDK arm64 + Gradle），APK `apksigner verify` v2 通过，`versionCode=28` / `0.5.1-preview` |
+| 单元/策略 | Rust UI 25、core 25（新增分页 total/页尾/去重/上限 3 个测试）、Java 4 组通过 |
+| 真实 WASM 浏览器 | `node tools/check-rust-ui.cjs` 通过：700 首歌单头部显示总数、首屏 100 行、继续加载触发 `load_more_tracks`、追加后渲染更多、播放全部/随机发 `play_all`、图集仍每资源最多请求 1 次；截图 `device-debug/rust-ui/browser/playlist-long.png` |
+| 实机 | `adb devices` 为空；未验证真实账号下歌单分页的接口行为、滚动加载手感与长列表滚动性能 |
+
+## 0.5.0 历史改动交接表
 
 | 需求 / 根因 | 修复行为与源码入口 | 验证 / 后续 |
 | :-- | :-- | :-- |

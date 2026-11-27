@@ -162,8 +162,37 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     assert.ok(await page.locator('.loading').isVisible());
     data.detailLoading = false; data.detailError = '连接暂时不可用'; await content();
     assert.ok(await page.locator('[data-action=retry_playlist]').isVisible());
-    data.detailError = ''; data.tracks = rows; data.counts.tracks = rows.length; await content();
+    // A playlist longer than the first page keeps the real total in the header and
+    // loads more songs while scrolling instead of stopping at 100. Covers repeat and
+    // use identities not seen earlier, so the run still asserts one request per
+    // artwork identity instead of tripping over the bounded decoded-image cache.
+    const longPlaylist = Array.from({ length: 700 }, (_, i) => ({ ...song(i), coverUrl: `https://example.invalid/art-${700 + (i % 4)}` }));
+    data.detailError = ''; data.tracks = longPlaylist.slice(0, 100); data.counts.tracks = 700;
+    data.detailTotal = 700; data.detailHasMore = true; data.detailLoadingMore = false; await content();
+    assert.ok(await page.locator('#content .song-row').count() === 100, 'Expected the first rendered page');
+    assert.ok((await page.locator('#content').innerText()).includes('700 首'), 'Header did not show the real song count');
+    assert.ok((await page.locator('.local-more .more-note').innerText()).includes('已加载 100 / 700 首'));
+    await page.waitForTimeout(450);
+    await page.screenshot({ path: path.join(output, 'playlist-long.png') });
+    await page.locator('[data-action=local_more]').click();
+    assert.ok(await page.evaluate(() => window.__actions.some(a => a.type === 'load_more_tracks')), 'Load-more did not request the next page');
+    // The mock bridge answers with the next service page.
+    data.tracks = longPlaylist.slice(0, 200);
+    data.detailHasMore = true; await content();
     await page.locator('#content').evaluate(e => { e.scrollTop = e.scrollHeight; });
+    await page.waitForTimeout(120);
+    assert.ok((await page.locator('#content .song-row').count()) > 100, 'Fetched songs were not rendered');
+    await page.evaluate(() => { window.__actions.length = 0; });
+    await page.locator('[data-action=play_tracks]').click();
+    await page.locator('[data-action=shuffle_tracks]').click();
+    const played = await page.evaluate(() => window.__actions.filter(a => a.type === 'play_all'));
+    assert.equal(played.length, 2);
+    assert.equal(played[0].shuffle, false); assert.equal(played[1].shuffle, true);
+    // With every page fetched the list ends normally and the scroll controls stay.
+    data.tracks = longPlaylist; data.counts.tracks = 700; data.detailHasMore = false; await content();
+    await page.locator('#content').evaluate(e => { e.scrollTop = e.scrollHeight; });
+    await page.waitForTimeout(150);
+    assert.ok((await page.locator('#content .song-row').count()) >= 100);
     await page.locator('[data-action=top]').waitFor({ state: 'visible' });
     assert.ok(await page.locator('[data-action=top]').isVisible());
     assert.ok(await page.locator('[data-action=locate]').isVisible());

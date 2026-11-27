@@ -1683,7 +1683,10 @@ h1 {
 }
 
 .sheet>header h2 { flex:1; }
-.local-more { padding:12px; display:flex; justify-content:center; }
+.local-more { padding:18px 12px 28px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; }
+.local-more .more-note { font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
+.local-more .more-loading { display:flex; align-items:center; gap:10px; font-size:13px; color:var(--muted); }
+.local-more .button { min-width:168px; }
 
 /* Decoded artwork fades in instead of popping into place. The Rust resource layer
    only assigns a blob URL once the bytes exist, so `[src]` marks readiness. */

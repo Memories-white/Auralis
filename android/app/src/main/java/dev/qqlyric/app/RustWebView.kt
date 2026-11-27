@@ -146,6 +146,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
         val m=music
         val keys=listOf(m.page,m.home,m.library,m.discoverySongs,m.tracks,m.favorites,m.recentPlays,m.searchResults,m.searchHistory,m.queue,m.profile,m.mid,
             m.loggedIn,m.avatar,m.uin,m.detailTitle,m.detailCover,m.detailLoading,m.detailError,m.status,m.busy,m.discoveryLoading,m.discoveryError,m.discoveryMore,
+            m.detailTotal,m.detailHasMore,m.detailLoadingMore,
             m.searchText,m.searchedQuery,m.monetEnabled,m.monetColor,m.monetSource,m.monetStyle,m.monetSpec,m.colorMode,m.audioQuality,m.qualityFallback,
             m.qrOpen,m.qrBitmap,m.qrStatus,m.lyrics,m.translation,m.collectionBusy,m.collectionMessage,uiPreferences.toString(),palette,safeTop,safeBottom,cacheBytes)
         if(keys!=contentKeys){
@@ -157,6 +158,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
                 put("page",m.page);put("loggedIn",m.loggedIn);put("nickname",m.profile.optString("nickname"));put("avatar",m.avatar);put("uin",m.uin)
                 put("homeReady",m.home.length()>0);put("dailyCover",m.home.optJSONArray("daily")?.optJSONObject(0)?.artwork().orEmpty())
                 put("detailTitle",m.detailTitle);put("detailCover",m.detailCover);put("detailLoading",m.detailLoading);put("detailError",m.detailError)
+                put("detailTotal",m.detailTotal);put("detailHasMore",m.detailHasMore);put("detailLoadingMore",m.detailLoadingMore)
                 put("query",m.searchText);put("searchedQuery",m.searchedQuery);put("busy",m.busy);put("status",m.status)
                 put("discoveryLoading",m.discoveryLoading);put("discoveryError",m.discoveryError);put("discoveryMore",m.discoveryMore)
                 put("colorMode",m.colorMode);put("monet",m.monetEnabled);put("monetSource",m.monetSource);put("monetStyle",m.monetStyle);put("monetSpec",m.monetSpec);put("monetColor",m.monetColor)
@@ -170,6 +172,11 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
                 put("reducedMotion",Settings.Global.getFloat(activity.contentResolver,Settings.Global.ANIMATOR_DURATION_SCALE,1f)==0f)
                 val counts=JSONObject().put("history",m.searchHistory.size).put("artists",artists.size)
                 sources.forEach{id->val rows=source(id);put(id,JSONArray(rows.map{if(id=="playlists"||id=="recommendations")it else clean(it)}));counts.put(id,rows.size)}
+                // The header shows how many songs the playlist really has, not how many
+                // pages have been fetched so far.
+                if(m.page=="songs"&&m.detailTotal>0)counts.put("tracks",m.detailTotal)
+                val likedTotal=m.library.optInt("total",0)
+                if(likedTotal>counts.optInt("likes",0))counts.put("likes",likedTotal)
                 put("counts",counts)
             }
             send("content",state)
@@ -199,7 +206,12 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
             "back"->m.back()
             "play"->{val rows=source(event.optString("source"));val requested=event.optInt("index",-1);val mid=event.optString("mid");val index=if(mid.isNotBlank())rows.indexOfFirst{it.optString("mid")==mid}else requested;if(index in rows.indices)m.play(rows,index)}
             "playlist"->{val item=JSONObject().put("id",event.optLong("id")).put("dirid",event.optLong("dirid")).put("title",event.optString("title")).put("cover",event.optString("cover")).put("kind",event.optString("kind"));if(event.optString("source")=="recommendations")m.recommendedPlaylist(item)else m.playlist(item.optLong("id"),item.optLong("dirid"),item.optString("title"),item.optString("cover"))}
-            "open_collection"->{val source=event.optString("source");if(source in setOf("likes","favorites"))m.openSongs(source(source),activity.getString(if(source=="likes")R.string.liked_music else R.string.local_favorites))}
+            "open_collection"->{val kind=event.optString("source");when(kind){
+                "likes"->m.playlist(0,201,activity.getString(R.string.liked_music))
+                "favorites"->m.openSongs(source("favorites"),activity.getString(R.string.local_favorites))
+            }}
+            "load_more_tracks"->m.loadMoreTracks()
+            "play_all"->m.playAllTracks(event.optBoolean("shuffle"))
             "transport"->{val action=event.optString("action");if(action in setOf("PAUSE","RESUME","PREVIOUS","NEXT"))m.command(action)}
             "seek"->m.command("SEEK","position",event.optInt("position").coerceIn(0,m.duration.coerceAtLeast(0)))
             "search"->{m.searchText=event.optString("query").take(200);m.search()}
@@ -213,7 +225,6 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
             "quality"->m.chooseAudioQuality(event.optString("value"));"toggle_fallback"->m.allowQualityFallback(!m.qualityFallback)
             "favorite"->m.toggleFavorite();"cycle_mode"->m.cyclePlaybackMode()
             "prepare_actions"->{m.collectionMessage="";if(m.loggedIn&&m.library.length()==0)m.refreshLibrary()}
-            "shuffle_tracks"->if(m.tracks.isNotEmpty()){m.choosePlaybackMode("SHUFFLE");m.play(m.tracks,m.tracks.indices.random())}
             "sleep"->{val minutes=event.optInt("minutes");if(minutes in setOf(-1,0,15,30,60,90))m.setSleepTimer(minutes)}
             "add_cloud"->{val mid=event.optString("mid");if(mid==m.mid)m.currentSong()?.let{m.addCloudSong(it,event.optLong("dirid"))}}
         }

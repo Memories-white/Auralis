@@ -578,6 +578,125 @@ fn playlist(session: &Value, id: u64, dirid: u64) -> Result<Value, String> {
         songs_in(&root["diss"]["data"], "list")
     }
 }
+/// One page of a playlist. The UI requests pages while the user scrolls, so a
+/// playlist is no longer limited to the first 100 songs the single-shot
+/// `playlist` command returns. `total` comes from the service when it reports one
+/// and is otherwise derived from the page size.
+const PLAYLIST_PAGE_MAX: u64 = 200;
+/// Lenient page extraction: a page past the end may omit the list key entirely, and
+/// that must end paging quietly instead of surfacing a request error mid-scroll.
+fn page_songs(data: &Value, key: &str) -> Value {
+    Value::Array(
+        data[key]
+            .as_array()
+            .map(|list| list.iter().filter_map(normalize_song).collect())
+            .unwrap_or_default(),
+    )
+}
+fn playlist_total(data: &Value) -> Option<u64> {
+    // `uniform_get_Dissinfo` reports the song count under several names depending on
+    // the playlist kind; `GetUniformSongDetailInfo` uses `total`.
+    ["total_song_num", "songnum", "songNum", "total", "song_num"]
+        .iter()
+        .find_map(|key| number(&data[*key]))
+        .filter(|total| *total >= 0)
+        .map(|total| total as u64)
+}
+fn playlist_page_value(songs: Value, total: Option<u64>, offset: u64, size: u64) -> Value {
+    let count = songs.as_array().map(Vec::len).unwrap_or(0) as u64;
+    let has_more = match total {
+        Some(total) => offset.saturating_add(count) < total,
+        None => count >= size,
+    } && count > 0;
+    json!({
+        "songs": songs,
+        "total": total.unwrap_or_else(|| offset.saturating_add(count)),
+        "offset": offset,
+        "size": size,
+        "nextOffset": offset.saturating_add(count),
+        "hasMore": has_more
+    })
+}
+fn playlist_page(
+    session: &Value,
+    id: u64,
+    dirid: u64,
+    offset: u64,
+    size: u64,
+) -> Result<Value, String> {
+    let size = size.clamp(1, PLAYLIST_PAGE_MAX);
+    if id > 0 {
+        let root = account_request(
+            session,
+            json!({"diss":{"module":"music.srfDissInfo.aiDissInfo","method":"uniform_get_Dissinfo","param":{"disstid":id,"userinfo":1,"tag":1,"song_begin":offset,"song_num":size}}}),
+        )?;
+        let data = &root["diss"]["data"];
+        let total = playlist_total(data);
+        Ok(playlist_page_value(
+            page_songs(data, "songlist"),
+            total,
+            offset,
+            size,
+        ))
+    } else {
+        let root = account_request(
+            session,
+            json!({"diss":{"module":"music.musicasset.PlaylistDetailRead","method":"GetUniformSongDetailInfo","param":{"uin":field(session,"uin"),"dirid":dirid,"bPaged":true,"offset":offset,"size":size}}}),
+        )?;
+        let data = &root["diss"]["data"];
+        let total = playlist_total(data);
+        Ok(playlist_page_value(
+            page_songs(data, "list"),
+            total,
+            offset,
+            size,
+        ))
+    }
+}
+/// Safety bound for one explicit "play all" request. Playlists are paged until the
+/// service reports no more songs; this only prevents an unresponsive service from
+/// keeping a request alive forever.
+const PLAYLIST_ALL_MAX: usize = 3000;
+const PLAYLIST_ALL_MAX_PAGES: usize = 40;
+fn collect_playlist_pages(
+    mut fetch: impl FnMut(u64) -> Result<Value, String>,
+) -> Result<Vec<Value>, String> {
+    let mut songs: Vec<Value> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut offset = 0u64;
+    for _ in 0..PLAYLIST_ALL_MAX_PAGES {
+        let page = fetch(offset)?;
+        let batch = page["songs"].as_array().cloned().unwrap_or_default();
+        let mut added = 0usize;
+        for song in batch {
+            let mid = field(&song, "mid").to_owned();
+            if !mid.is_empty() && !seen.insert(mid) {
+                continue;
+            }
+            songs.push(song);
+            added += 1;
+        }
+        let has_more = page["hasMore"].as_bool().unwrap_or(false);
+        offset = page["nextOffset"]
+            .as_u64()
+            .unwrap_or_else(|| offset.saturating_add(added as u64));
+        // A page that adds nothing means the service ignored the offset; stop rather
+        // than requesting the same page forever.
+        if !has_more || added == 0 || songs.len() >= PLAYLIST_ALL_MAX {
+            break;
+        }
+    }
+    songs.truncate(PLAYLIST_ALL_MAX);
+    Ok(songs)
+}
+/// Every song of a playlist, used when the user explicitly plays or shuffles the
+/// whole list: a queue must not be limited to the pages already scrolled through.
+fn playlist_all(session: &Value, id: u64, dirid: u64) -> Result<Value, String> {
+    let songs = collect_playlist_pages(|offset| {
+        playlist_page(session, id, dirid, offset, PLAYLIST_PAGE_MAX)
+    })?;
+    Ok(Value::Array(songs))
+}
 fn home(session: &Value) -> Result<Value, String> {
     let root = account_request(
         session,
@@ -632,6 +751,18 @@ pub fn dispatch(command: &str, input: &str) -> String {
             "guess" => discovery::guess(&v),
             "library" => library(&v["session"]),
             "playlist" => playlist(
+                &v["session"],
+                v["id"].as_u64().unwrap_or(0),
+                v["dirid"].as_u64().unwrap_or(0),
+            ),
+            "playlist_page" => playlist_page(
+                &v["session"],
+                v["id"].as_u64().unwrap_or(0),
+                v["dirid"].as_u64().unwrap_or(0),
+                v["offset"].as_u64().unwrap_or(0),
+                v["size"].as_u64().unwrap_or(100),
+            ),
+            "playlist_all" => playlist_all(
                 &v["session"],
                 v["id"].as_u64().unwrap_or(0),
                 v["dirid"].as_u64().unwrap_or(0),
@@ -780,5 +911,91 @@ mod tests {
         assert!(select_playback(&root,"hq",false).is_err());
         root["code"]=json!(2000);assert!(select_playback(&root,"auto",true).unwrap_err().contains("过期"));
     }
-
+    #[test]
+    fn playlist_totals_are_read_from_every_reported_key() {
+        assert_eq!(
+            playlist_total(&json!({"total_song_num":705})),
+            Some(705)
+        );
+        assert_eq!(playlist_total(&json!({"total":"1200"})), Some(1200));
+        assert_eq!(playlist_total(&json!({"songnum":30})), Some(30));
+        assert_eq!(playlist_total(&json!({"unrelated":1})), None);
+        assert_eq!(playlist_total(&json!({"total":-1})), None);
+    }
+    #[test]
+    fn playlist_pages_report_remaining_songs() {
+        let song = |mid: &str| json!({"mid":mid,"title":mid});
+        // A page past the end may omit the list key; that is an empty page, not an error.
+        assert_eq!(page_songs(&json!({}), "songlist"), json!([]));
+        let songs = page_songs(&json!({"songlist":[{"mid":"a"},{"title":"no mid"}]}), "songlist");
+        assert_eq!(songs.as_array().map(Vec::len), Some(1));
+        assert_eq!(songs[0]["mid"], "a");
+        let page = playlist_page_value(
+            json!([song("a"), song("b")]),
+            Some(5),
+            0,
+            2,
+        );
+        assert_eq!(page["total"], 5);
+        assert_eq!(page["nextOffset"], 2);
+        assert_eq!(page["hasMore"], true);
+        // Last page: offset + returned count reaches the reported total.
+        let last = playlist_page_value(json!([song("e")]), Some(5), 4, 2);
+        assert_eq!(last["hasMore"], false);
+        // Without a reported total a full page means there may be more.
+        let unknown = playlist_page_value(json!([song("a"), song("b")]), None, 0, 2);
+        assert_eq!(unknown["total"], 2);
+        assert_eq!(unknown["hasMore"], true);
+        let short = playlist_page_value(json!([song("a")]), None, 2, 2);
+        assert_eq!(short["hasMore"], false);
+        // Overrunning the reported total never claims more data.
+        let beyond = playlist_page_value(json!([song("z")]), Some(3), 3, 2);
+        assert_eq!(beyond["hasMore"], false);
+        // An empty page always ends paging, even if a total looks larger.
+        let empty = playlist_page_value(json!([]), Some(999), 0, 100);
+        assert_eq!(empty["hasMore"], false);
+    }
+    #[test]
+    fn playlist_all_pages_until_the_service_reports_the_end() {
+        let page = |offset: u64| {
+            let remaining = 250u64.saturating_sub(offset);
+            let count = remaining.min(100) as usize;
+            let songs: Vec<Value> = (0..count)
+                .map(|i| json!({"mid": format!("m{}", offset + i as u64)}))
+                .collect();
+            Ok(playlist_page_value(json!(songs), Some(250), offset, 100))
+        };
+        let songs = collect_playlist_pages(page).unwrap();
+        assert_eq!(songs.len(), 250);
+        assert_eq!(songs[0]["mid"], "m0");
+        assert_eq!(songs[249]["mid"], "m249");
+    }
+    #[test]
+    fn playlist_all_stops_when_a_page_adds_nothing() {
+        // A service that ignores the requested offset must not loop forever.
+        let mut calls = 0;
+        let songs = collect_playlist_pages(|_| {
+            calls += 1;
+            Ok(playlist_page_value(
+                json!([{"mid":"same"},{"mid":"same2"}]),
+                None,
+                0,
+                100,
+            ))
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+        assert_eq!(songs.len(), 2);
+    }
+    #[test]
+    fn playlist_all_is_bounded_by_the_safety_limit() {
+        let songs = collect_playlist_pages(|offset| {
+            let batch: Vec<Value> = (0..100)
+                .map(|i| json!({"mid": format!("m{}", offset * 100 + i)}))
+                .collect();
+            Ok(playlist_page_value(json!(batch), None, offset, 100))
+        })
+        .unwrap();
+        assert_eq!(songs.len(), PLAYLIST_ALL_MAX);
+    }
 }

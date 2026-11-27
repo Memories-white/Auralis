@@ -642,7 +642,20 @@ impl App {
             "collapse_mini" => {
                 self.mini_until = 0.0;
             }
-            "local_more" => self.extend_list(),
+            "local_more" => {
+                if self.render_pending() {
+                    self.extend_list();
+                } else if s(&self.data, "page") == "songs"
+                    && b(&self.data, "detailHasMore")
+                    && !b(&self.data, "detailLoadingMore")
+                {
+                    self.last_load = 0.0;
+                    post(json!({"type":"load_more_tracks"}));
+                } else {
+                    // Discovery shelves grow through the same rendering batch.
+                    self.extend_list();
+                }
+            }
             "logout_confirm" => {
                 self.sheet.clear();
                 post(json!({"type":"logout"}));
@@ -662,8 +675,10 @@ impl App {
                 self.sheet = self.sheet_stack.pop().unwrap_or_default();
                 self.paint_overlay();
             }
-            "play_tracks" => post(json!({"type":"play","source":"tracks","index":0})),
-            "shuffle_tracks" => post(json!({"type":"shuffle_tracks"})),
+            // Playing the whole list resolves every remaining service page first, so
+            // the queue is never limited to the rows fetched for the current screen.
+            "play_tracks" => post(json!({"type":"play_all","shuffle":false})),
+            "shuffle_tracks" => post(json!({"type":"play_all","shuffle":true})),
             "queue" | "quality" | "sleep" | "song-actions" | "add-playlist" | "logout"
             | "clear_recent" => {
                 if self.sheet == "song-actions"
@@ -1249,14 +1264,21 @@ impl App {
                             .any(|v| s(v, "mid") == s(&self.live, "mid")),
                 ),
             );
-            if main.scroll_height() - top - main.client_height() < 500
-                && doc()
-                    .query_selector("#content .local-more")
-                    .ok()
-                    .flatten()
-                    .is_some()
-            {
+            let near_bottom = main.scroll_height() - top - main.client_height() < 520;
+            if near_bottom && self.render_pending() {
+                // First show the rows already fetched, then ask for the next page.
                 self.extend_list();
+                return;
+            }
+            if near_bottom
+                && page == "songs"
+                && b(&self.data, "detailHasMore")
+                && !b(&self.data, "detailLoadingMore")
+                && !b(&self.data, "detailLoading")
+                && now() - self.last_load > 700.0
+            {
+                self.last_load = now();
+                post(json!({"type":"load_more_tracks"}));
                 return;
             }
             if page == "home"
@@ -1272,13 +1294,33 @@ impl App {
             }
         }
     }
+    /// Data source of the currently rendered long list; empty when the page has none.
+    fn list_source(&self) -> &'static str {
+        match s(&self.data, "page") {
+            "songs" => "tracks",
+            "recent" => "recent",
+            "home" => "discovery",
+            "search" => "search",
+            _ => "",
+        }
+    }
+    /// True when more fetched songs are available than the current render batch shows.
+    fn render_pending(&self) -> bool {
+        let id = self.list_source();
+        if id.is_empty() {
+            return false;
+        }
+        let shown = *self.limits.get(&self.route_key()).unwrap_or(&100) as usize;
+        self.source(id).len() > shown
+    }
     fn extend_list(&mut self) {
         self.save_scroll();
         let route = self.route_key();
         let next = self.limits.get(&route).copied().unwrap_or(100) + 100;
         self.limits.insert(route, next);
         self.paint_content();
-    }    fn frame(&mut self, time: f64) {
+    }
+    fn frame(&mut self, time: f64) {
         let dt = if self.last_frame <= 0.0 {
             1.0 / 60.0
         } else {
@@ -1295,7 +1337,8 @@ impl App {
         if animating != self.animation_vote {
             self.animation_vote = animating;
             post(json!({"type":"animation_rate","active":animating}));
-        }        if self.player
+        }
+        if self.player
             && !self.reduced
             && b(&self.live, "playing")
             && customization::get(&self.data, "background") == "flow"
