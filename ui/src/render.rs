@@ -368,6 +368,7 @@ pub fn player(
     data: &Value,
     lines: &[(i32, String)],
     translations: &[(i32, String)],
+    word_lines: &[Vec<crate::karaoke::Word>],
 ) -> String {
     let mut information = String::new();
     let song = &data["currentSong"];
@@ -392,7 +393,8 @@ pub fn player(
     } else {
         lines.iter().enumerate().map(|(index,(time,line))|{
         let translated=translations.iter().find(|(at,_)|(*time-*at).abs()<=500).map(|(_,t)|format!("<small>{}</small>",esc(t))).unwrap_or_default();
-        format!("<div id=lyric-{index} class=lyric-line data-action=\"lyric-seek:{time}\"><strong>{}</strong>{translated}</div>",esc(line))
+        let words=word_lines.get(index).filter(|words|!words.is_empty()).map(|words|words.iter().enumerate().map(|(j,word)|format!("<span id=word-{index}-{j} class=karaoke-word>{}</span>",esc(&word.text))).collect::<String>());
+        format!("<div id=lyric-{index} class=lyric-line data-action=\"lyric-seek:{time}\"><strong>{}</strong>{translated}</div>",words.unwrap_or_else(||esc(line)))
     }).collect::<String>()
     };
     let mode = match s(live, "mode") {

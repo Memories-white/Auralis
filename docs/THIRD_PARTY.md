@@ -13,6 +13,8 @@
 
 ## 依赖
 
+0.5.3 的云端QRC解码器按 MIT 项目 [jixunmoe-go/qrc](https://github.com/jixunmoe-go/qrc) 固定提交 `866e996416b0cec7bef648400633f6483c4200d5` 移植到Rust，保留[许可](licenses/QRC-LICENSE)与[修改说明](licenses/QRC-NOTICE.md)。限长解压使用flate2及其Rust backend，依赖版本锁定在core/Cargo.lock。逐字UI和进度逻辑独立使用Rust/CSS实现。
+
 0.4.5 参考 Melodist 的 `MobileCoverCacheResolver.kt`、`AlbumArtImage.kt` 中缓存优先与避免重复淡入的设计。Auralis 的请求合并、Blob资源与DOM节点保留独立使用Rust实现；Android继续承担磁盘、字节响应与已有状态持久化桥接。
 
 0.4.4 的设置和底栏参考同一固定 Melox 提交中的主题设置、设置首页及歌词偏好分组，使用 Rust 独立实现功能和视觉；不复制这些 GPL 文件的源码。玻璃效果使用 WebView 普通背景模糊，不声称复现原生液态折射。适配和未适配项目见 [交接表](HANDOFF.md)。

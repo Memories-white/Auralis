@@ -145,7 +145,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
             m.loggedIn,m.avatar,m.uin,m.detailTitle,m.detailCover,m.detailLoading,m.detailError,m.status,m.busy,m.discoveryLoading,m.discoveryError,m.discoveryMore,
             m.detailTotal,m.detailHasMore,m.detailLoadingMore,
             m.searchText,m.searchedQuery,m.monetEnabled,m.monetColor,m.monetSource,m.monetStyle,m.monetSpec,m.colorMode,m.audioQuality,m.qualityFallback,
-            m.qrOpen,m.qrImage,m.qrStatus,m.lyrics,m.translation,m.collectionBusy,m.collectionMessage,uiPreferences.toString(),palette,safeTop,safeBottom,cacheBytes)
+            m.qrOpen,m.qrImage,m.qrStatus,m.lyrics,m.translation,m.wordLyrics,m.collectionBusy,m.collectionMessage,uiPreferences.toString(),palette,safeTop,safeBottom,cacheBytes)
         if(keys!=contentKeys){
             contentKeys=keys
             val artists=m.discoverySongs.map{it.optString("artist")}.filter{it.isNotBlank()}.distinct().take(8)
@@ -163,7 +163,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
                 put("quality",m.audioQuality);put("qualityFallback",m.qualityFallback);put("version",BuildConfig.VERSION_NAME)
                 put("wallpaperSupported",Build.VERSION.SDK_INT>=31);put("artworkAvailable",m.cover.isNotBlank())
                 put("qrOpen",m.qrOpen);put("qrStatus",m.qrStatus);put("qrImage",m.qrImage)
-                put("lyrics",m.lyrics);put("translation",m.translation);put("collectionBusy",m.collectionBusy);put("collectionMessage",m.collectionMessage)
+                put("lyrics",m.lyrics);put("translation",m.translation);put("wordLyrics",m.wordLyrics);put("collectionBusy",m.collectionBusy);put("collectionMessage",m.collectionMessage)
                 put("currentSong",m.currentSong()?.let(::clean)?:JSONObject())
                 put("history",JSONArray(m.searchHistory));put("artists",JSONArray(artists));put("colors",JSONObject(palette));put("safeTop",safeTop);put("safeBottom",safeBottom);put("cacheBytes",cacheBytes)
                 put("reducedMotion",Settings.Global.getFloat(activity.contentResolver,Settings.Global.ANIMATOR_DURATION_SCALE,1f)==0f)

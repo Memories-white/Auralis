@@ -14,6 +14,7 @@ use std::{
 const GATEWAY: &str = "https://u.y.qq.com/cgi-bin/musicu.fcg";
 mod discovery;
 mod artwork;
+mod qrc;
 mod playlist;
 use playlist::load as playlist;
 const AGENT: &str = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36";
@@ -490,18 +491,23 @@ fn parse_playback(service: &Value) -> Option<String> {
         })
 }
 fn lyrics(mid: &str, id: u64, cookies: &Value) -> Result<Value, String> {
-    let payload = json!({"comm":{"ct":24,"cv":0},"playLyricInfo":{"module":"music.musichallSong.PlayLyricInfo","method":"GetPlayLyricInfo",
-        "param":{"songMID":mid,"songID":id,"qrc":0,"trans":1,"roma":0,"isHQ":1}}});
+    let query=|word:bool| json!({"module":"music.musichallSong.PlayLyricInfo","method":"GetPlayLyricInfo",
+        "param":{"songMID":mid,"songID":id,"qrc":if word{1}else{0},"trans":1,"roma":0,"isHQ":1}});
+    let payload = json!({"comm":{"ct":24,"cv":0},"playLyricInfo":query(false),"wordLyricInfo":query(true)});
     let data = gateway(payload, cookies)?;
     let info = &data["playLyricInfo"]["data"];
     let decode = |s: &str| {
+        if s.starts_with('<') || s.starts_with('[') {return s.to_owned();}
+        if !s.is_empty() && s.len()%16==0 && s.bytes().all(|b|b.is_ascii_hexdigit()) {return qrc::decrypt(s).unwrap_or_default();}
         STANDARD
             .decode(s)
             .ok()
             .and_then(|b| String::from_utf8(b).ok())
             .unwrap_or_default()
     };
-    Ok(json!({"lyric":decode(field(info,"lyric")),"translation":decode(field(info,"trans"))}))
+    let words=qrc::parse(&decode(field(&data["wordLyricInfo"]["data"],"lyric")));
+    let plain=if words.is_empty(){decode(field(info,"lyric"))}else{qrc::lrc(&words)};
+    Ok(json!({"lyric":plain,"translation":decode(field(info,"trans")),"wordLyrics":words}))
 }
 fn account_request(session: &Value, requests: Value) -> Result<Value, String> {
     if field(session, "musicKey").is_empty() {

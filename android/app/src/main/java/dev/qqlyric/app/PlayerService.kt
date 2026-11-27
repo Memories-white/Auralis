@@ -26,7 +26,7 @@ data class PlaybackSnapshot(
     val playing:Boolean=false, val position:Int=0, val duration:Int=0,
     val lyric:String="", val translation:String="", val error:String="", val token:String="",val quality:String="",val qualityPending:Boolean=false,val downgraded:Boolean=false,
     val sleepRemainingSeconds:Int=0,val sleepAfterTrack:Boolean=false,val sleepFinished:Boolean=false,val sleepMinutes:Int=0,
-    val queueJson:String="[]",val index:Int=-1
+    val queueJson:String="[]",val index:Int=-1,val wordLyrics:String="[]"
 )
 
 class PlayerService : Service() {
@@ -60,6 +60,7 @@ class PlayerService : Service() {
     private var song = JSONObject()
     private var lyric = ""
     private var translation = ""
+    private var wordLyrics = "[]"
     private var playing = false
     private var prepared = false
     private var loading = false
@@ -118,6 +119,7 @@ class PlayerService : Service() {
                 song = JSONObject(intent.getStringExtra("song") ?: "{}")
                 lyric = intent.getStringExtra("lyric") ?: ""
                 translation = intent.getStringExtra("translation") ?: ""
+                wordLyrics = intent.getStringExtra("wordLyrics")?.takeIf{it.length<=384*1024} ?: "[]"
                 queue = JSONArray(intent.getStringExtra("queue") ?: "[]")
                 queueJson=queue.toString()
                 account = JSONObject(intent.getStringExtra("session") ?: "{}")
@@ -151,6 +153,7 @@ class PlayerService : Service() {
                 if(intent.getStringExtra("mid")!=song.optString("mid")||intent.getStringExtra("token")!=playToken)return START_NOT_STICKY
                 lyric = intent.getStringExtra("lyric") ?: ""
                 translation = intent.getStringExtra("translation") ?: ""
+                wordLyrics = intent.getStringExtra("wordLyrics")?.takeIf{it.length<=384*1024} ?: "[]"
                 publish()
             }
             "NEXT" -> skip(1)
@@ -206,7 +209,7 @@ class PlayerService : Service() {
         if(player==null&&song.optString("mid").isNotBlank())PlaybackStore.save(this,song,queue.objects(),currentIndex,target,durationMs)
         publish()
     }
-    private fun stopPlayback() { persistPlayback(true,true);sleepTimer.clear();sleepFinished=false;generation++;actualQuality="";qualityPending=false;skipPending=false;downgraded=false;player?.release(); player = null;song=JSONObject();queue=JSONArray();queueJson="[]";lyric="";translation="";currentArtwork="";currentIndex=-1;positionMs=0;durationMs=0;playbackError="";prepared=false;loading=false;playing=false;publish();foreground=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf() }
+    private fun stopPlayback() { persistPlayback(true,true);sleepTimer.clear();sleepFinished=false;generation++;actualQuality="";qualityPending=false;skipPending=false;downgraded=false;player?.release(); player = null;song=JSONObject();queue=JSONArray();queueJson="[]";lyric="";translation="";wordLyrics="[]";currentArtwork="";currentIndex=-1;positionMs=0;durationMs=0;playbackError="";prepared=false;loading=false;playing=false;publish();foreground=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf() }
 
     private fun persistPlayback(force:Boolean=false,sync:Boolean=false){
         if(!prepared||loading||song.optString("mid").isBlank())return
@@ -242,7 +245,7 @@ class PlayerService : Service() {
                 }}
                 if(result.optBoolean("ok")){
                     val resultLyrics=JSONObject(RustCore.call("lyrics",JSONObject().put("mid",candidate.optString("mid")).put("id",candidate.optLong("id")).put("session",JSONObject(credentials)).toString()))
-                    if(resultLyrics.optBoolean("ok"))ui.post{if(request==generation){val data=resultLyrics.getJSONObject("data");lyric=data.optString("lyric");translation=data.optString("translation");publish()}}
+                    if(resultLyrics.optBoolean("ok"))ui.post{if(request==generation){val data=resultLyrics.getJSONObject("data");lyric=data.optString("lyric");translation=data.optString("translation");wordLyrics=data.optJSONArray("wordLyrics")?.toString()?.takeIf{it.length<=384*1024}?:"[]";publish()}}
                 }
             }catch(_:Exception){ui.post{if(request==generation){loading=false;wantPlay=false;playbackError=getString(R.string.request_retry);publish()}}}
         }
@@ -284,9 +287,9 @@ class PlayerService : Service() {
                     return@execute
                 }
                 val url=result.getJSONObject("data").getString("url")
-                ui.post{if(request==generation){skipPending=false;actualQuality=result.getJSONObject("data").optString("quality");downgraded=result.getJSONObject("data").optBoolean("downgraded");playToken=java.util.UUID.randomUUID().toString();song=candidate;lyric="";translation="";currentIndex=next;play(url)}}
+                ui.post{if(request==generation){skipPending=false;actualQuality=result.getJSONObject("data").optString("quality");downgraded=result.getJSONObject("data").optBoolean("downgraded");playToken=java.util.UUID.randomUUID().toString();song=candidate;lyric="";translation="";wordLyrics="[]";currentIndex=next;play(url)}}
                 val lyrics=JSONObject(RustCore.call("lyrics",JSONObject().put("mid",candidate.optString("mid")).put("id",candidate.optLong("id")).put("session",JSONObject(credentials)).toString()))
-                if(lyrics.optBoolean("ok"))ui.post{if(request==generation){val data=lyrics.getJSONObject("data");lyric=data.optString("lyric");translation=data.optString("translation");publish()}}
+                if(lyrics.optBoolean("ok"))ui.post{if(request==generation){val data=lyrics.getJSONObject("data");lyric=data.optString("lyric");translation=data.optString("translation");wordLyrics=data.optJSONArray("wordLyrics")?.toString()?.takeIf{it.length<=384*1024}?:"[]";publish()}}
             }catch(_:Exception){ui.post{if(request==generation){skipPending=false;order.reset(queue.length(),currentIndex);playbackError=getString(R.string.request_retry);publish()}}}
         }
     }
@@ -321,7 +324,7 @@ class PlayerService : Service() {
         }
     }
 
-    private fun updateSnapshot(){snapshot=PlaybackSnapshot(song.optString("mid"),currentTitle,currentArtist,currentArtwork,playing,positionMs,durationMs,lyric,translation,playbackError,playToken,actualQuality,qualityPending,downgraded,((sleepTimer.remaining(SystemClock.elapsedRealtime())+999)/1000).toInt(),sleepTimer.isAfterTrack,sleepFinished,sleepTimer.minutes,queueJson,currentIndex)}
+    private fun updateSnapshot(){snapshot=PlaybackSnapshot(song.optString("mid"),currentTitle,currentArtist,currentArtwork,playing,positionMs,durationMs,lyric,translation,playbackError,playToken,actualQuality,qualityPending,downgraded,((sleepTimer.remaining(SystemClock.elapsedRealtime())+999)/1000).toInt(),sleepTimer.isAfterTrack,sleepFinished,sleepTimer.minutes,queueJson,currentIndex,wordLyrics)}
 
     private fun publish() {
         val duration = (if(prepared)player?.duration?.toLong() else null)?.takeIf { it > 0 } ?: durationMs.toLong().takeIf{it>0} ?: song.optLong("duration") * 1000

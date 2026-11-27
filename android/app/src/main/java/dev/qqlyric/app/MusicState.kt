@@ -111,6 +111,7 @@ class MusicState(private val context:Context,private val protocol:(String,String
     var position by mutableIntStateOf(if(PlayerService.snapshot.mid.isNotBlank())PlayerService.snapshot.position else savedPlayback?.position?:0)
     var duration by mutableIntStateOf(if(PlayerService.snapshot.mid.isNotBlank())PlayerService.snapshot.duration else savedPlayback?.duration?:0)
     var lyrics by mutableStateOf("")
+    var wordLyrics by mutableStateOf("[]")
     var translation by mutableStateOf("")
     val uin get()=session.optString("uin")
     val avatar get()=profile.optString("avatar").takeIf{it.startsWith("http")}?.replace("http://","https://")
@@ -346,7 +347,7 @@ class MusicState(private val context:Context,private val protocol:(String,String
     fun play(songs:List<JSONObject>,index:Int){
         if(index !in songs.indices)return
         val preferred=audioQuality;val fallback=qualityFallback
-        val song=songs[index];val request=++playGeneration;val token=java.util.UUID.randomUUID().toString();pendingToken=token;pendingMid=song.optString("mid");mid=pendingMid?:"";title=song.optString("title");artist=song.optString("artist");cover=song.artwork();lyrics="";translation="";actualQuality="";qualityPending=false;qualityDowngraded=false;position=0;duration=song.optInt("duration")*1000;playing=false;status=context.getString(R.string.loading_song)
+        val song=songs[index];val request=++playGeneration;val token=java.util.UUID.randomUUID().toString();pendingToken=token;pendingMid=song.optString("mid");mid=pendingMid?:"";title=song.optString("title");artist=song.optString("artist");cover=song.artwork();lyrics="";translation="";wordLyrics="[]";actualQuality="";qualityPending=false;qualityDowngraded=false;position=0;duration=song.optInt("duration")*1000;playing=false;status=context.getString(R.string.loading_song)
         playbackStatus=status
         if(PlayerService.snapshot.mid.isNotBlank())command("SELECT")
         call("play_url",JSONObject().put("song",song).put("session",session).put("quality",preferred).put("fallback",fallback)){result->
@@ -359,7 +360,7 @@ class MusicState(private val context:Context,private val protocol:(String,String
             playbackStatus=""
             call("lyrics",JSONObject().put("mid",song.optString("mid")).put("id",song.optLong("id")).put("session",session)){lyricResult->
                 if(request==playGeneration&&lyricResult.optBoolean("ok")){
-                    val data=lyricResult.getJSONObject("data");command("LYRIC","token",token,"mid",song.optString("mid"),"lyric",data.optString("lyric"),"translation",data.optString("translation"))
+                    val data=lyricResult.getJSONObject("data");command("LYRIC","token",token,"mid",song.optString("mid"),"lyric",data.optString("lyric"),"translation",data.optString("translation"),"wordLyrics",data.optJSONArray("wordLyrics")?.toString()?.takeIf{it.length<=384*1024}?:"[]")
                 }
             }
         }
@@ -379,7 +380,7 @@ class MusicState(private val context:Context,private val protocol:(String,String
                 mid=saved.song.optString("mid");title=saved.song.optString("title");artist=saved.song.optString("artist");cover=saved.song.artwork()
                 queue=saved.queue;currentIndex=saved.index;position=saved.position;duration=saved.duration
             }?:run{mid="";title="";artist="";cover="";currentIndex=-1;position=0;duration=0}
-            lyrics="";translation=""
+            lyrics="";translation="";wordLyrics="[]"
             playing=false;actualQuality="";qualityPending=false;qualityDowngraded=false
             return
         }
@@ -388,7 +389,7 @@ class MusicState(private val context:Context,private val protocol:(String,String
         currentIndex=state.index
         mid=state.mid;title=state.title;artist=state.artist;cover=state.artwork
         playing=state.playing;position=state.position;duration=state.duration
-        lyrics=state.lyric;translation=state.translation
+        lyrics=state.lyric;translation=state.translation;wordLyrics=state.wordLyrics
         actualQuality=state.quality;qualityPending=state.qualityPending;qualityDowngraded=state.downgraded
         val serviceError=displayError(state.error)
         if(serviceError.isNotBlank()){status=serviceError;playbackStatus=serviceError}else if(lastServiceError.isNotBlank()){

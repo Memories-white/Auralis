@@ -6,17 +6,40 @@
 
 | 项目 | 状态 / 入口 |
 | :-- | :-- |
-| 日期、版本 | 2026-11-27 · `0.5.2-preview` · versionCode `29` |
-| 基线 | `a457103` · 已先推送本地0.5.1，再合并远程修复链 |
+| 日期、版本 | 2026-11-27 · `0.5.3-preview` · versionCode `30` |
+| 基线 | `b8c380b` · 0.5.2分支整合版 |
 | 当前提交 | 本文与本次实现同一个提交；使用 `git log -1` 获取完整 SHA，避免文档自引用哈希 |
-| 最新本地包 | `APKs/Auralis-v0.5.2-preview.apk` |
-| APK SHA256 | `BD022BA7C35702FC833C6609D52AF9D6C6B78CA46E3660A144FF6349F3B9FBC9` |
-| 包体 | 16048403 字节；`apksigner verify` v2 通过（debug 证书） |
+| 最新本地包 | `APKs/Auralis-v0.5.3-preview.apk` |
+| APK SHA256 | `363A81CF16040E71CEE8C91531F3E4125A5670D72DA5AB404C8A6CC3B598F9C1` |
+| 包体 | 17295846 字节；`apksigner verify` 通过（debug 证书） |
 | 仓库 | [Memories-white/Auralis](https://github.com/Memories-white/Auralis) · public |
 | 已发布版本 | GitHub Release 与主分支分开管理；本次不自动创建 Release |
 | 当前界面架构 | Rust/WASM + Android WebView；不要恢复 Kotlin 页面或增加 JS 动画控制器 |
 
 ## 本次改动交接表
+
+| 问题 / 需求 | 实现与入口 | 验证 / 边界 |
+| :-- | :-- | :-- |
+| 当前整句一起变亮，参考图需要句内随唱渐亮 | `core/src/lib.rs::lyrics` 同一请求读取行级与逐字歌词；有真实逐字数据时生成一致的LRC与wordLyrics | 不用行长或字数猜时间；无逐字数据保留整句跟随 |
+| QRC为加密响应 | `core/src/qrc.rs` / `qrc_tables.rs`：MIT来源的自定义DES变体移植为Rust，zlib限长解压，解析XML里的绝对词时间 | 已验证上游独立算法向量；许可和修改说明见docs/licenses/QRC-*；只支持云端hex，不读取本地QMC文件 |
+| 队列自动切歌、恢复等路径缺失逐字数据 | `MusicState.kt`、`PlayerService.kt`、`RustWebView.kt`新增wordLyrics字符串桥接；Snapshot末尾追加默认字段；PLAY/LYRIC/自动下一首/恢复读取/停止均传递或清理 | 384KiB桥接上限；Provider/媒体通知仍收到不含词标记的普通LRC |
+| 逐词视觉与实时性 | `ui/src/karaoke.rs`校验文本匹配、计算进度；`lib.rs::sync_lyrics`在行索引未改变时仍按播放时钟更新当前词；`render.rs`输出词片段，CSS做柔边文字渐变 | 已唱白、未唱灰；译文较淡；保留居中、逐行上浮与远近模糊；设置字号/字重/对齐继续有效 |
+| 性能 | 缓存词DOM节点和上次填充值，只写当前句中进度改变的词，不重建整段歌词 | 时间使用现有毫秒播放时钟+短程插值；暂停不推进，跳转可前进或倒退 |
+| 公共协议诊断 | `core/examples/check_word_lyrics.rs`只打印行/词数量，不打印歌词或凭据 | `cargo run --manifest-path core/Cargo.toml --example check_word_lyrics --offline -- 003rJSwm3TechU`：本轮28行/385个词；服务响应可能变化 |
+
+## 0.5.3 验证表
+
+| 检查 | 结果 |
+| :-- | :-- |
+| 单元/策略 | Rust UI27、core40、Java4组通过；包括算法向量、QRC绝对时间与空格、无效输入、进度倒退和行级回退 |
+| 实际协议 | 公共曲目、不带账号：普通/逐字合并请求均code0；实际Rust dispatch到解密/解析链路成功，28行385词；没有保存或上传歌词正文 |
+| 浏览器 | 真实WASM+自写词句夹具：已唱/正在唱/未唱的填充不同；暂停冻结；seek复位；跨句；帧间推进；没有逐字时间时不生成词片段；原回归通过 |
+| 视觉 | 深色、多行、居中、未唱灰/已唱白与柔边检查截图在忽略目录device-debug/rust-ui/browser/karaoke-progress.png；不冒充真实歌曲截图 |
+| 构建与包 | 完整build.ps1 -Offline成功；code30 / 0.5.3-preview；最终包签名检查通过，哈希见上表 |
+| 实机 | 用户要求先继续修改，之后连接手机再通知；本轮未安装或验证截图中的歌曲/音频对齐。连接后保留数据安装，重新播放曲目以获取新逐字数据，检查暂停/seek/自动下一首 |
+| 发布 | 交付时推送main；本地APK与GitHub Release分开；未创建新Release |
+
+## 0.5.2 历史改动交接表
 
 | 来源 / 差异 | 合并处理 | 验证与后续 |
 | :-- | :-- | :-- |

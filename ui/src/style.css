@@ -1845,6 +1845,8 @@ h1 {
 #app[data-ui-lyricblur="off"] .lyric-line { filter:none; }
 #app[data-ui-translation="off"] .lyric-line small { display:none; }
 #app[data-ui-lyricscale="off"] .lyric-line.active { transform:scale(1); }
+.lyric-line.active .karaoke-word { --karaoke-muted:color-mix(in srgb,var(--fg) 42%,transparent); background:linear-gradient(90deg,var(--fg) calc(var(--word-fill,-8%) - 7%),var(--karaoke-muted) calc(var(--word-fill,-8%) + 7%)); background-clip:text; -webkit-background-clip:text; color:transparent; -webkit-text-fill-color:transparent; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
+.lyric-line.active small { opacity:.55; }
 #app[data-ui-lyriccontrols="off"] .lyrics-page .player-footer .transport { display:none; }
 #app[data-ui-motion="reduced"] .nav-pill { transform:translateX(calc(var(--nav-index,0) * 100%)) }
 

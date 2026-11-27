@@ -3,6 +3,7 @@
 mod artwork;
 mod customization;
 mod icons;
+mod karaoke;
 mod labels;
 mod lyric_motion;
 mod motion;
@@ -41,6 +42,9 @@ struct App {
     lyric_mid: String,
     lines: Vec<(i32, String)>,
     translations: Vec<(i32, String)>,
+    word_lines: Vec<Vec<karaoke::Word>>,
+    word_nodes: Vec<Vec<HtmlElement>>,
+    word_fills: Vec<Vec<i32>>,
     browse_until: f64,
     lyric_scroll: f64,
     lyric_velocity: f64,
@@ -813,10 +817,11 @@ impl App {
             .unwrap_or(0);
         let mid = s(&self.live, "mid");
         let timeline = s(&self.data, "lyrics");
-        let identity = format!("{mid}:{timeline}");
+        let identity = format!("{mid}:{timeline}:{}", s(&self.data, "wordLyrics"));
         if self.lyric_mid != identity {
             self.lines = parse_lrc(timeline);
             self.translations = parse_lrc(s(&self.data, "translation"));
+            self.word_lines = karaoke::parse(s(&self.data, "wordLyrics"), &self.lines);
             self.lyric_mid = identity;
             self.active_line = None;
             self.lyric_velocity = 0.0;
@@ -825,9 +830,34 @@ impl App {
         }
         set_html(
             "player",
-            &render::player(&self.live, &self.data, &self.lines, &self.translations),
+            &render::player(
+                &self.live,
+                &self.data,
+                &self.lines,
+                &self.translations,
+                &self.word_lines,
+            ),
         );
         self.lyric_viewport = el("lyric-viewport").and_then(|e| e.dyn_into().ok());
+        self.word_nodes = self
+            .word_lines
+            .iter()
+            .enumerate()
+            .map(|(i, words)| {
+                words
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(j, _)| {
+                        el(&format!("word-{i}-{j}")).and_then(|e| e.dyn_into().ok())
+                    })
+                    .collect()
+            })
+            .collect();
+        self.word_fills = self
+            .word_lines
+            .iter()
+            .map(|words| vec![-1; words.len()])
+            .collect();
         self.lyric_nodes = (0..self.lines.len())
             .filter_map(|i| el(&format!("lyric-{i}")).and_then(|e| e.dyn_into().ok()))
             .collect();
@@ -1252,6 +1282,24 @@ impl App {
             .lines
             .partition_point(|(time, _)| *time <= position)
             .checked_sub(1);
+        if let Some(index) = next {
+            if let (Some(words), Some(nodes), Some(fills)) = (
+                self.word_lines.get(index),
+                self.word_nodes.get(index),
+                self.word_fills.get_mut(index),
+            ) {
+                for ((word, node), previous) in words.iter().zip(nodes).zip(fills) {
+                    let fill = karaoke::fill(word, position);
+                    if *previous != fill {
+                        let _ = node.style().set_property(
+                            "--word-fill",
+                            &format!("{:.2}%", fill as f64 * 0.116 - 8.0),
+                        );
+                        *previous = fill;
+                    }
+                }
+            }
+        }
         if next == self.active_line {
             return;
         }

@@ -343,9 +343,39 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     await page.locator('#mini-player .mini-identity>span:not(.artwork)').click(); await page.waitForTimeout(500);
     assert.equal(await page.locator('#shared-artwork').count(), 0, 'Reduced motion still mounted the shared morph');
     assert.ok(Math.abs(Number(await page.locator('#cover-art').evaluate(e => getComputedStyle(e).opacity)) - 1) < 0.01);
+    // Self-authored timed text: highlight advances within a line, pauses exactly,
+    // reverses on seek and never invents timing for ordinary LRC.
+    data.colors = { bg:'#151515', card:'#252525', fg:'#f5f5f5', muted:'#92929b', primary:'#91b6ff', 'on-primary':'#182c4b', border:'#3d3e42' };
+    data.lyrics = '[00:00.000]Stay with the rhythm of a quieter night\n[00:05.000]Let every word shine\n[00:10.000]Hear the quiet melody';
+    data.translation = '[00:00.000]跟随旋律\n[00:05.000]让每个词亮起\n[00:10.000]听见安静的旋律';
+    data.wordLyrics = JSON.stringify([
+      {time:0,end:5000,text:'Stay with the rhythm of a quieter night',words:[{text:'Stay ',start:0,end:1000},{text:'with ',start:1000,end:2000},{text:'the ',start:2000,end:3000},{text:'rhythm ',start:3000,end:3500},{text:'of ',start:3500,end:3800},{text:'a ',start:3800,end:4000},{text:'quieter ',start:4000,end:4500},{text:'night',start:4500,end:5000}]},
+      {time:5000,end:10000,text:'Let every word shine',words:[{text:'Let ',start:5000,end:6000},{text:'every ',start:6000,end:7000},{text:'word ',start:7000,end:8000},{text:'shine',start:8000,end:9500}]}
+    ]);
+    data.uiPreferences = {lyricAlign:'center',lyricSize:'28',lyricBlur:'on'};
+    live.position=1500;live.playing=false;await content();await pulse();
+    await page.locator('[data-action=player_lyrics]').click();await page.waitForTimeout(800);
+    const fills = () => page.locator('#lyric-0 .karaoke-word').evaluateAll(ws => ws.map(w => parseFloat(w.style.getPropertyValue('--word-fill'))));
+    let wordFills=await fills();
+    assert.ok(wordFills[0]>=100 && Math.abs(wordFills[1]-50)<1 && wordFills[2]<0, 'Completed/current/future words are not independently lit');
+    await page.waitForTimeout(200);assert.deepEqual(await fills(),wordFills,'Paused word highlight advanced');
+    live.position=2500;await pulse();await page.waitForTimeout(50);wordFills=await fills();
+    assert.ok(wordFills[1]>=100 && Math.abs(wordFills[2]-50)<1,'Highlight did not move to the next word');
+    live.position=500;await pulse();await page.waitForTimeout(50);wordFills=await fills();
+    assert.ok(Math.abs(wordFills[0]-50)<1 && wordFills[1]<0,'Seeking did not restore word progress');
+    live.position=5500;await pulse();await page.waitForTimeout(50);
+    assert.ok(await page.locator('#lyric-1').evaluate(e=>e.classList.contains('active')),'Word timeline did not follow the next line');
+    live.position=1000;live.playing=true;await pulse();await page.waitForTimeout(50);
+    const firstFrame=(await fills())[1];await page.waitForTimeout(70);
+    assert.ok((await fills())[1]>firstFrame,'Word highlight did not advance between native playback pulses');
+    live.playing=false;
+    live.position=1500;await pulse();await page.waitForTimeout(80);
+    await page.screenshot({path:path.join(output,'karaoke-progress.png')});
+    data.wordLyrics='[]';await content();
+    assert.equal(await page.locator('.karaoke-word').count(),0,'Line-only lyrics acquired fabricated word timing');
     assert.ok([...artworkRequests.values()].every(n => n === 1), 'A cached artwork was requested more than once');
     assert.equal(errors.length, 0, errors.join('\n'));
     console.log('PASS: real Rust/WASM boot, safe layout, shelf gutter, one daily entry, continuous dock indicator, continuous cover morph with matching corner radius, player expansion, native touch swipes through information, cover and lyrics, exact active line, manual-follow recovery, spring mini collapse, search/IME focus, playlist filters/loading/retry, top/locate, settings hub/sub-pages with native round-trip, half-height sheet and wide layout.');
-    fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ result: 'passed', engine: 'real Rust/WASM; mock native service bridge', artwork: { unique: artworkRequests.size, maximumRequestsPerArtwork: Math.max(...artworkRequests.values()), decodedNodeRetained: true, pageAndPlayerReuse: true }, dock: dockSettled, cover: { frames: morph.filter(f => f.active).length, landed: landed.radius, handedOver: !landed.overlay }, focal, bounds, screenshots: fs.readdirSync(output).filter(n => n.endsWith('.png')) }, null, 2));
+    fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ result: 'passed', engine: 'real Rust/WASM; mock native service bridge', karaoke:{wordFill:true,pause:true,seek:true,betweenPulses:true,lineFallback:true}, artwork: { unique: artworkRequests.size, maximumRequestsPerArtwork: Math.max(...artworkRequests.values()), decodedNodeRetained: true, pageAndPlayerReuse: true }, dock: dockSettled, cover: { frames: morph.filter(f => f.active).length, landed: landed.radius, handedOver: !landed.overlay }, focal, bounds, screenshots: fs.readdirSync(output).filter(n => n.endsWith('.png')) }, null, 2));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
