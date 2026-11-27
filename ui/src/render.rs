@@ -103,7 +103,7 @@ pub fn header(p: &Value, data: &Value) -> String {
     } else {
         action("back", &label("back"), "back", "")
     };
-    let tools = if matches!(s(data, "page"), "home" | "mine") {
+    let tools = if matches!(s(data, "page"), "home" | "collection" | "mine") {
         let profile = if b(data, "loggedIn") {
             format!("<button class=\"icon-button profile-action\" data-action=\"navigate:mine\" aria-label=\"{}\">{}</button>",esc(&label("my_account")),art(s(data,"avatar"),true,""))
         } else {
@@ -139,7 +139,7 @@ pub fn navigation(p: &Value) -> String {
             esc(s(item, "route")),
             index as f64 / count as f64,
             if current { "aria-current=\"page\"" } else { "" },
-            icon(s(item, "icon")),
+            icon(&format!("{}-filled",s(item,"icon"))),
             esc(&text(&item["text"]))
         ));
     }
@@ -187,7 +187,14 @@ fn node(v: &Value, data: &Value, live: &Value, parent_enabled: bool) -> String {
         }
     );
     match s(v,"kind"){
-        "card"=>format!("<div class=\"card {}\" style=\"{style}--padding:{}px\"{}>{}</div>",if action_id.is_empty(){""}else{"pressable"},v["padding"].as_f64().unwrap_or(20.0),attr(action_id,active),children()),
+        "card"=>format!("<div class=\"card {} {}\" style=\"{style}--padding:{}px\"{}>{}</div>",esc(s(v,"key")),if action_id.is_empty(){""}else{"pressable"},v["padding"].as_f64().unwrap_or(20.0),attr(action_id,active),children()),
+        "playlist-header"=>format!("<div class=playlist-hero>{}<div><h2>{}</h2><p>{}</p></div></div>",art(s(v,"cover"),false,""),esc(s(v,"title")),if b(v,"loading"){label("loading_playlist")}else{format!("{} 首歌曲",n(v,"count"))}),
+        "playlist-tabs"=>format!("<div class=\"segmented playlist-tabs\" role=tablist><button role=tab aria-selected=\"{}\" class=\"{}\" data-action=detail-songs>歌曲</button><button role=tab aria-selected=\"{}\" class=\"{}\" data-action=detail-artists>参与艺术家</button></div>",!b(v,"artists"),if b(v,"artists"){""}else{"selected"},b(v,"artists"),if b(v,"artists"){"selected"}else{""}),
+        "playlist-artists"=>{
+            let mut artists=std::collections::BTreeSet::new();
+            for song in source(data,"tracks"){for artist in s(song,"artist").split(" / "){if !artist.trim().is_empty(){artists.insert(artist.trim());}}}
+            format!("<div class=artist-list><p class=artist-note>根据已加载歌曲整理</p>{}</div>",artists.iter().map(|name|format!("<button class=artist-row data-action=\"artist-search:{}\">{}<span>{}</span>{}</button>",esc(name),icon("account"),esc(name),icon("search"))).collect::<String>())
+        },
         "row"=>format!("<div class=row style=\"{style};margin-bottom:{}px\">{}</div>",v["bottom"].as_f64().unwrap_or(0.0),children()),
         "column"=>format!("<div class=column style=\"{style}\">{}</div>",children()),
         "text"=>format!("<div class=\"text {}\">{}</div>",esc(s(v,"style")),esc(&text(&v["text"]))),
@@ -333,10 +340,10 @@ pub fn mini(live: &Value, data: &Value) -> String {
     };
     format!(
         "<div class=mini-line aria-hidden=true></div>\
-         <div class=mini-identity>{art}<span class=mini-meta><strong>{title}</strong><small>{artist}</small></span>\
+         <div class=mini-identity>{art}<span class=mini-meta><strong>{title}</strong><small id=mini-caption>{artist}</small></span>\
          <div class=mini-compact>{play}{queue}</div>\
          <button class=\"icon-button collapse-mini\" data-action=collapse_mini aria-label=\"{collapse}\">{down}</button></div>\
-         <div class=mini-expanded><div class=mini-progress>{seek}{times}</div>{transport}<div class=mini-tools>{favorite}{queue}</div></div>",
+         <div class=mini-expanded><div class=mini-progress>{seek}{times}</div><div class=mini-five>{favorite}{previous}{play}{next}{queue}</div></div>",
         art = art(image, false, "mini-art"),
         title = escaped_or(title, "select_song"),
         artist = esc(artist),
@@ -351,7 +358,8 @@ pub fn mini(live: &Value, data: &Value) -> String {
         down = icon("down"),
         seek = seek(),
         times = times(),
-        transport = transport(live, true),
+        previous=action("previous", &label("previous"), "previous", ""),
+        next=action("next", &label("next"), "next", ""),
         favorite = action(
             "favorite",
             &label("local_favorites"),
@@ -364,8 +372,15 @@ pub fn lyrics(
     lines: &[(i32, String)],
     translations: &[(i32, String)],
     word_lines: &[Vec<crate::karaoke::Word>],
+    data: &Value,
 ) -> String {
     if lines.is_empty() {
+        if s(data, "lyricState") == "error" {
+            return "<div class=lyric-empty><h2>歌词暂时加载失败</h2><button class=button data-action=retry_lyrics>重试</button></div>".into();
+        }
+        if matches!(s(data, "lyricState"), "loading" | "idle") {
+            return "<div class=\"lyric-empty loading\" role=status><i class=spinner></i><p>正在加载歌词</p></div>".into();
+        }
         format!(
             "<div class=lyric-empty><h2>{}</h2><p>{}</p></div>",
             label("no_lyrics"),
@@ -405,7 +420,7 @@ pub fn player(
         ));
     }
     let lyric_lines = if render_lyrics {
-        lyrics(lines, translations, word_lines)
+        lyrics(lines, translations, word_lines, data)
     } else {
         String::new()
     };

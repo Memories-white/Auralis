@@ -2,7 +2,45 @@
 
 > 每次改动后更新此表；入口约定已写入根目录 `AGENTS.md`。布局、交互、设置校验和动画以 Rust 为主，Android 只做必要的平台桥接。
 
-## 当前交付
+## 当前交付 · 0.5.7
+
+| 项目 | 状态 / 入口 |
+| :-- | :-- |
+| 日期、版本 | 2026-11-27 · 0.5.7-preview · versionCode 34 |
+| 源码基线 | d2a87feaa02df63e3768c7a5d777ed8457c03754，修改前本地main与origin/main一致 |
+| 当前提交 | 本文随本轮代码提交并推送main；使用git log -1读取完整SHA，避免自引用 |
+| 本地APK | APKs/Auralis-v0.5.7-preview.apk，17494286字节，目录被Git忽略 |
+| SHA256 | 16CC38E9D46448B6D753D56725B8EB2F363ED62D49AC9CA71067BD411FA85C60 |
+| 签名 | apksigner v2通过，debug证书SHA256 a1dab650d1c39a63e21255150995b50e2cac236337e794c33a96e7db292cbfde，与上版一致 |
+| 安装 / Release | 用户会在USB连接后通知；本轮未安装、未发布GitHub Release，源码推送与APK交付分开 |
+
+### 本轮交接表
+
+| 请求 / 问题 | 实现与准确入口 | 验证 / 限制 / 下一步 |
+| :-- | :-- | :-- |
+| 恢复歌曲只在播放后出现歌词 | MusicState.kt::sample不再每180ms清空；ensureLyrics/retryLyrics使用专用worker，与播放启动解耦；RustWebView发布lyricState | Rust core新增无session/无播放的缓存恢复集成检查；WASM验证暂停时loading→ready、error→retry且无play事件依赖。手机进程冷启动与真实歌词请求需之后实测 |
+| 本地歌词缓存 | core/src/lyric_cache.rs与lib.rs::cached_lyrics；MusicState和PlayerService两处自动/恢复路径传私有cacheDir | 单份512KiB、8MiB/64份；校验mid/version与损坏文件，原子写入；淘汰最旧修改文件。测试拒绝空歌词、错误mid、损坏JSON，不保留session，保护无关文件；无歌词结果不负缓存 |
+| 懒加载错误显示无歌词 | render.rs::lyrics统一处理四种状态；lib.rs::ensure_lyrics与player共用；retry_lyrics原生桥接 | 新回归抓到原懒加载路径漏传状态，现已修复；请求失败可重试，真正成功且为空才显示暂无歌词 |
+| 图2展开歌曲栏裁切 | render.rs::mini改为进度+单排收藏/上一首/播放/下一首/队列；style.css::mini-five；lib.rs::advance_mini移动浮动按钮 | WASM断言五个按钮全部处于卡片边界内；截图mini-expanded-light.png复核。保留4.5秒自动收起及共享封面动画 |
+| 图4/图5歌曲栏和底栏 | render.rs::mini/navigation、presentation.rs::screen、lib.rs::paint_progress/dock_index/layout_shell、icons.rs、MusicState/RustWebView路由桥 | 首页/歌曲/音乐库/设置四栏，单色实心图标与选中强调；标准mini68/nav64，悬浮mini64/nav64且带文字；详情仅歌曲栏。mini副标题按播放进度更新当前歌词，无歌词时回退作者；不显示折叠mini进度线 |
+| 歌曲页数据边界 | collection根页展示已经同步的喜欢与最近播放；入口仍可由音乐库打开完整云端喜欢 | 没有伪造全网歌曲库或本地扫描，根页当前喜欢数据范围与既有同步一致；完整喜欢仍通过原分页歌单入口 |
+| 重做歌单 | presentation.rs::detail、render.rs::playlist-header/playlist-tabs/playlist-artists、style.css::playlist-* | 去掉重复大标题/大卡片，96px封面+单一标题、真实歌曲数、分段按钮、平面歌曲行；700首分页/播放全部/随机/定位回归通过；艺术家只取已加载歌曲，无虚构专辑年份或艺人资料 |
+| 歌单标签与后退 | lib.rs::detail_artists/route_key分别保存标签滚动、屏蔽艺术家标签的歌曲自动分页；RustWebView搜索路由，MusicState::navigate/back保留返回歌单请求 | 艺术家点击发搜索事件，原生进入搜索；返回保留原歌单分页元数据。真实网络与系统返回待手机验证 |
+| 关于页 | render.rs::slot(about_identity)、lib.rs::paint_header_scroll、style.css::.about-* | 112px图标、35px名称、14px版本与弥散背景；滚动20–80/80–140/140–200px依次淡出。唯一关于入口、5份本地许可、外链/复制与滚动恢复回归通过；使用Auralis品牌，不复制Melox社区/赞助链接 |
+| Melox逐词上浮 | ui/src/karaoke.rs::effect/spatial_reveal/eligible，lib.rs::cache_lyric_nodes/sync_lyrics，style.css::karaoke-glyph | 重叠窗口0.68或4/(n+3)，长音强度smoothstep、sin²脉冲、余弦上浮；字形宽度仅挂载时读，逐帧使用缓存。修复已显亮字仍在脉冲时被旧缓存跳过；暂停/seek/跨句/减少动态、真实字形矩阵通过 |
+| 参考与许可 | Melox bfe7c5dc467b84d7a9df8e63c93208a3e6f61672 的AboutScreen/MiniPlayer/布局作行为研究，LyricsView.kt明确Apache-2.0的函数移植 | 更新docs/licenses/Melox-lyrics-NOTICE.md与THIRD_PARTY；GPL设置/关于代码独立实现。DOM字形/字体栅格、WebView磨砂与Compose材质不保证像素或GPU输出完全相同 |
+| 验证与交付 | test.ps1、check-rust-ui.cjs、check-player-motion.cjs melox-057-final、完整build.ps1、样式令牌lint、APK签名 | UI30/core44/Java4组通过；WASM含暂停歌词、加载/重试、4导航、艺术家标签、5按钮边界；lint0错误0警告。浏览器68回调、间隔中位约16.7ms/P95约16.8ms，不等于手机GPU帧率；设备验证仍待连接 |
+
+### 下一位AI先做
+
+1. 用户通知USB已连接后再检查ADB并保留数据安装上面APK；不要求现在连接，不清数据、不重新登录。
+2. 对照用户真实歌曲做“强制停止→重开→保持暂停→进入歌词”，确认缓存与联网缺失路径；检查返回歌单与连续切歌的歌词身份。
+3. 录制展开/收起与逐词长音；测手机回调、FrameTimeline/卡顿，再决定是否调整光晕/模糊。不要把浏览器16.7ms描述为手机120Hz。
+4. 继续遵守Rust布局/交互/动画规则；Kotlin仅保留现有状态、媒体与平台桥；更新此交接表并区分源码、APK、安装、Release。
+
+---
+
+## 0.5.6 历史交付
 
 | 项目 | 状态 / 入口 |
 | :-- | :-- |

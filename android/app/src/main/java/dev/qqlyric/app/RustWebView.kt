@@ -166,7 +166,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
             m.loggedIn,m.avatar,m.uin,m.detailTitle,m.detailCover,m.detailLoading,m.detailError,m.status,m.busy,m.discoveryLoading,m.discoveryError,m.discoveryMore,
             m.detailTotal,m.detailHasMore,m.detailLoadingMore,
             m.searchText,m.searchedQuery,m.monetEnabled,m.monetColor,m.monetSource,m.monetStyle,m.monetSpec,m.colorMode,m.audioQuality,m.qualityFallback,
-            m.qrOpen,m.qrImage,m.qrStatus,m.lyrics,m.translation,m.wordLyrics,m.collectionBusy,m.collectionMessage,uiPreferences.toString(),palette,safeTop,safeBottom,cacheBytes)
+            m.qrOpen,m.qrImage,m.qrStatus,m.lyricState,m.lyrics,m.translation,m.wordLyrics,m.collectionBusy,m.collectionMessage,uiPreferences.toString(),palette,safeTop,safeBottom,cacheBytes)
         if(keys!=contentKeys){
             contentKeys=keys
             val artists=m.discoverySongs.map{it.optString("artist")}.filter{it.isNotBlank()}.distinct().take(8)
@@ -186,7 +186,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
                 put("quality",m.audioQuality);put("qualityFallback",m.qualityFallback);put("version",BuildConfig.VERSION_NAME)
                 put("wallpaperSupported",Build.VERSION.SDK_INT>=31);put("artworkAvailable",m.cover.isNotBlank())
                 put("qrOpen",m.qrOpen);put("qrStatus",m.qrStatus);put("qrImage",m.qrImage)
-                put("lyrics",m.lyrics);put("translation",m.translation);put("wordLyrics",m.wordLyrics);put("collectionBusy",m.collectionBusy);put("collectionMessage",m.collectionMessage)
+                put("lyricState",m.lyricState);put("lyrics",m.lyrics);put("translation",m.translation);put("wordLyrics",m.wordLyrics);put("collectionBusy",m.collectionBusy);put("collectionMessage",m.collectionMessage)
                 put("currentSong",m.currentSong()?.let(::clean)?:JSONObject())
                 put("history",JSONArray(m.searchHistory));put("artists",JSONArray(artists));put("colors",JSONObject(palette));put("safeTop",safeTop);put("safeBottom",safeBottom);put("cacheBytes",cacheBytes)
                 put("reducedMotion",Settings.Global.getFloat(activity.contentResolver,Settings.Global.ANIMATOR_DURATION_SCALE,1f)==0f)
@@ -223,10 +223,11 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
         when(event.optString("type")){
             "animation_rate"->animationRate(event.optBoolean("active"))
             "ready"->{ready=true;contentKeys=null;lastPulse="";publish()}
-            "navigate"->{val page=event.optString("page");if(page in setOf("home","mine","search")+SETTINGS_ROUTES)m.navigate(page)}
+            "navigate"->{val page=event.optString("page");if(page in setOf("home","collection","mine","search")+SETTINGS_ROUTES)m.navigate(page)}
             "open_external"->{val url=event.optString("url");if(url in setOf("https://github.com/Memories-white/Auralis","https://github.com/Memories-white/Auralis/releases","https://github.com/Memories-white/Auralis/issues")){runCatching{activity.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,Uri.parse(url)))}.onFailure{m.status=activity.getString(R.string.external_open_failed)}}}
             "copy_project"->{val clipboard=activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager;clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Auralis","https://github.com/Memories-white/Auralis"));m.status=activity.getString(R.string.project_address_copied)}
             "back"->m.back()
+            "retry_lyrics"->m.retryLyrics()
             "play"->{val rows=source(event.optString("source"));val requested=event.optInt("index",-1);val mid=event.optString("mid");val index=if(mid.isNotBlank())rows.indexOfFirst{it.optString("mid")==mid}else requested;if(index in rows.indices)m.play(rows,index)}
             "playlist"->{val item=JSONObject().put("id",event.optLong("id")).put("dirid",event.optLong("dirid")).put("title",event.optString("title")).put("cover",event.optString("cover")).put("kind",event.optString("kind"));if(event.optString("source")=="recommendations")m.recommendedPlaylist(item)else m.playlist(item.optLong("id"),item.optLong("dirid"),item.optString("title"),item.optString("cover"))}
             "open_collection"->{val kind=event.optString("source");when(kind){
@@ -255,7 +256,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
                 }
             }
             "seek"->m.command("SEEK","position",event.optInt("position").coerceIn(0,m.duration.coerceAtLeast(0)))
-            "search"->{m.searchText=event.optString("query").take(200);m.search()}
+            "search"->{if(m.page!="search")m.navigate("search");m.searchText=event.optString("query").take(200);m.search()}
             "login"->m.login();"dismiss_login"->m.dismissLogin();"logout"->m.logout()
             "daily"->m.daily();"refresh_home"->if(!m.busy)m.refreshHome();"refresh_library"->if(!m.busy)m.refreshLibrary()
             "retry_playlist"->m.retryPlaylist();"load_more"->m.loadMoreDiscovery();"clear_search"->m.clearSearchHistory();"clear_recent"->m.clearRecentPlays()

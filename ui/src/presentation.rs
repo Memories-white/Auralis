@@ -290,22 +290,9 @@ fn search(v: &Value) -> Vec<Value> {
 fn detail(v: &Value) -> Vec<Value> {
     let loading = yes(v, "detailLoading");
     let error = string(v, "detailError");
-    let mut head = vec![row(vec![
-        art(string(v, "detailCover"), 100, false),
-        column(vec![
-            text(value(string(v, "detailTitle")), "heading"),
-            text(
-                if loading {
-                    tr("loading_playlist")
-                } else if !error.is_empty() {
-                    tr("playlist_load_failed")
-                } else {
-                    arg("song_count", json!([count(v, "tracks")]))
-                },
-                "summary",
-            ),
-        ]),
-    ])];
+    let mut head = vec![
+        json!({"kind":"playlist-header","title":string(v,"detailTitle"),"cover":string(v,"detailCover"),"count":count(v,"tracks"),"loading":loading}),
+    ];
     if loading {
         head.push(json!({"kind":"loading","text":tr("playlist_loading_hint")}));
     }
@@ -329,7 +316,12 @@ fn detail(v: &Value) -> Vec<Value> {
             "explore",
         ));
     }
-    nodes.push(songs("tracks", "tracks", 0, 0));
+    nodes.push(json!({"kind":"playlist-tabs","artists":yes(v,"detailArtists")}));
+    if yes(v, "detailArtists") {
+        nodes.push(json!({"kind":"playlist-artists"}));
+    } else {
+        nodes.push(songs("tracks", "tracks", 0, 0));
+    }
     nodes
 }
 
@@ -858,6 +850,15 @@ pub fn screen(v: &Value) -> Result<Value, String> {
     let (title, nodes) = match page {
         "home" => (tr("home"), home(v)),
         "mine" => (tr("music_library"), library(v)),
+        "collection" => (
+            value("歌曲"),
+            vec![
+                section("collection-title", "liked_music", ""),
+                songs("collection-songs", "likes", 0, 0),
+                section("recent-title", "recent_plays", ""),
+                songs("collection-recent", "recent", 0, 20),
+            ],
+        ),
         "search" => (tr("search"), search(v)),
         "songs" => (value(string(v, "detailTitle")), detail(v)),
         "recent" => (tr("recent_plays"), recent(v)),
@@ -885,8 +886,8 @@ pub fn screen(v: &Value) -> Result<Value, String> {
         _ => return Err("Unknown presentation route".into()),
     };
     Ok(
-        json!({"schema":1,"route":page,"root":matches!(page,"home"|"mine"|"settings"),"title":title,"nodes":nodes,
-            "navigation":[{"route":"home","text":tr("home"),"icon":"home"},{"route":"mine","text":tr("music_library"),"icon":"library"},{"route":"settings","text":tr("settings"),"icon":"settings"}],
+        json!({"schema":1,"route":page,"root":matches!(page,"home"|"collection"|"mine"|"settings"),"title":title,"nodes":nodes,
+            "navigation":[{"route":"home","text":tr("home"),"icon":"home"},{"route":"collection","text":value("歌曲"),"icon":"music"},{"route":"mine","text":tr("music_library"),"icon":"library"},{"route":"settings","text":tr("settings"),"icon":"settings"}],
         "player":{"pages":[{"id":"information","text":tr("song_information")},{"id":"cover","text":tr("cover_page")},{"id":"lyrics","text":tr("lyrics_page")}],
             "initialPage":1,"transport":["previous","play","next"],"tools":["mode","quality","timer","queue","actions"]},
         "tokens":{"gutter":12,"sectionInset":28,"cardRadius":24,"artworkRadius":14,"shelfWidth":156,

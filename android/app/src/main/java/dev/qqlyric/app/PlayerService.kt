@@ -286,7 +286,7 @@ class PlayerService : Service() {
                     }
                 }}
                 if(result.optBoolean("ok")){
-                    val resultLyrics=JSONObject(RustCore.call("lyrics",JSONObject().put("mid",candidate.optString("mid")).put("id",candidate.optLong("id")).put("session",JSONObject(credentials)).toString()))
+                    val resultLyrics=JSONObject(RustCore.call("lyrics",JSONObject().put("mid",candidate.optString("mid")).put("id",candidate.optLong("id")).put("session",JSONObject(credentials)).put("cacheDir",java.io.File(cacheDir,"lyrics").absolutePath).toString()))
                     if(resultLyrics.optBoolean("ok"))ui.post{if(request==generation){val data=resultLyrics.getJSONObject("data");lyric=data.optString("lyric");translation=data.optString("translation");wordLyrics=data.optJSONArray("wordLyrics")?.toString()?.takeIf{it.length<=384*1024}?:"[]";publish()}}
                 }
             }catch(_:Exception){ui.post{if(request==generation){loading=false;wantPlay=false;playbackError=getString(R.string.request_retry);publish()}}}
@@ -330,7 +330,7 @@ class PlayerService : Service() {
                 }
                 val url=result.getJSONObject("data").getString("url")
                 ui.post{if(request==generation){skipPending=false;actualQuality=result.getJSONObject("data").optString("quality");downgraded=result.getJSONObject("data").optBoolean("downgraded");playToken=java.util.UUID.randomUUID().toString();song=candidate;lyric="";translation="";wordLyrics="[]";currentIndex=next;play(url)}}
-                val lyrics=JSONObject(RustCore.call("lyrics",JSONObject().put("mid",candidate.optString("mid")).put("id",candidate.optLong("id")).put("session",JSONObject(credentials)).toString()))
+                val lyrics=JSONObject(RustCore.call("lyrics",JSONObject().put("mid",candidate.optString("mid")).put("id",candidate.optLong("id")).put("session",JSONObject(credentials)).put("cacheDir",java.io.File(cacheDir,"lyrics").absolutePath).toString()))
                 if(lyrics.optBoolean("ok"))ui.post{if(request==generation){val data=lyrics.getJSONObject("data");lyric=data.optString("lyric");translation=data.optString("translation");wordLyrics=data.optJSONArray("wordLyrics")?.toString()?.takeIf{it.length<=384*1024}?:"[]";publish()}}
             }catch(_:Exception){ui.post{if(request==generation){skipPending=false;order.reset(queue.length(),currentIndex);playbackError=getString(R.string.request_retry);publish()}}}
         }

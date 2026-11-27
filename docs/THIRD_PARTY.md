@@ -13,6 +13,10 @@
 
 ## 依赖
 
+0.5.7 按用户提供的 Melox 截图更新四栏导航、磨砂歌曲栏、歌单信息区与关于页的视觉层次。普通栏仍使用64px导航；悬浮栏改为保留文字的64px圆角栏。此处以用户参考图覆盖0.5.6对Miuix默认52px悬浮栏的映射，不将自绘界面称为原生控件。关于页保留Auralis品牌和真实项目链接，独立实现，不复制GPL界面源码。
+
+逐词动效另核对 `bfe7c5dc467b84d7a9df8e63c93208a3e6f61672` 的Apache-2.0 `LyricsView.kt`：重叠字符窗口、长音脉冲与发光强度移植到Rust；实际DOM字形边界在挂载时缓存，羽化上浮独立映射。许可与修改范围见[动效声明](licenses/Melox-lyrics-NOTICE.md)。
+
 0.5.6 使用 Miuix 固定提交 `6d2554a850b8960e2616c968263ff64beb5ffb03`（v0.9.5-beta01）的 NavigationBar、Switch、Card、SmallTitle 和 Scaffold 契约核对布局、选中/按压状态及颜色角色；以 Rust/CSS 映射到既有WebView目标，原生MiuixTheme继续提供真实语义配色。SVG图标保留项目实现，CSS squircle缺少支持时采用圆角回退，不宣称它们是Compose原生组件。设置和关于的分组/导航关系参考同一Melox固定版本的SettingsScreen/AboutScreen，未复制其GPL界面实现。
 
 0.5.5 结合用户提供的播放器截图，研究同一Melox提交的 `FullPlayerScreen.kt`、`PlaybackSettingsSheets.kt`、`LyricRenderGeometry.kt` 和 `LyricsView.kt` 的可见效果，并参考 `AudioEffectPreferences.kt` 确认MiSound兼容入口。新增控制区、音效面板、队列策略与字形运动由Rust独立实现，未复制这些文件的新代码；原0.4.1中已注明Apache许可的移植范围不变。逐字的字形位移由真实词区间的揭示进度推导，不声称获取了原生逐字符时间，也没有移植原生文字栅格缓存器或液态玻璃渲染器。

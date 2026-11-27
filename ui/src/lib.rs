@@ -57,6 +57,8 @@ struct App {
     data: Value,
     live: Value,
     filter: String,
+    detail_artists: bool,
+    mini_lines: Vec<(i32, String)>,
     painted_route: String,
     sheet: String,
     sheet_stack: Vec<String>,
@@ -72,6 +74,7 @@ struct App {
     word_lines: Vec<Vec<karaoke::Word>>,
     word_nodes: Vec<Vec<HtmlElement>>,
     glyph_nodes: Vec<Vec<Vec<HtmlElement>>>,
+    glyph_geometry: Vec<Vec<Vec<(f64, f64)>>>,
     glyph_fills: Vec<Vec<Vec<i32>>>,
     word_fills: Vec<Vec<i32>>,
     browse_until: f64,
@@ -587,7 +590,10 @@ impl App {
         if let Some(root) = el("app") {
             let _ = root.set_attribute("data-wide", if wide { "true" } else { "false" });
             let floating = customization::get(&self.data, "bar") == "floating";
-            let root_page = matches!(s(&self.data, "page"), "home" | "mine" | "settings");
+            let root_page = matches!(
+                s(&self.data, "page"),
+                "home" | "collection" | "mine" | "settings"
+            );
             let bottom = shell::floating_bottom(safe);
             let clearance = if wide || !root_page {
                 92.0 + safe
@@ -599,11 +605,7 @@ impl App {
             style(&root, "--dock-clearance", &format!("{clearance}px"));
             style(&root, "--floating-bottom", &format!("{bottom}px"));
             let count = self.dock_count.max(1);
-            style(
-                &root,
-                "--floating-width",
-                &format!("{}px", 24 + count * 48 + count.saturating_sub(1) * 12),
-            );
+            style(&root, "--floating-width", &format!("{}px", 8 + count * 100));
         }
         self.header_layers = (|| {
             Some(HeaderLayers {
@@ -620,7 +622,34 @@ impl App {
             return;
         };
         let (w, h) = viewport();
-        let collapse = if !shell::settings(s(&self.data, "page")) {
+        let page = s(&self.data, "page");
+        if page == "about" {
+            let top = self
+                .content_layer
+                .as_ref()
+                .map(|e| e.scroll_top() as f64)
+                .unwrap_or(0.0);
+            for (selector, start, end) in [
+                (".about-version", 20.0, 80.0),
+                (".about-identity h2", 80.0, 140.0),
+                (".about-logo", 140.0, 200.0),
+            ] {
+                if let Some(node) = find(selector) {
+                    let p = ((top - start) / (end - start)).clamp(0.0, 1.0);
+                    style(&node, "opacity", &(1.0 - p).to_string());
+                    style(&node, "transform", &format!("scale({})", 1.0 - p * 0.05));
+                }
+            }
+        }
+        let collapse = if page == "songs" {
+            (self
+                .content_layer
+                .as_ref()
+                .map(|e| e.scroll_top() as f64)
+                .unwrap_or(0.0)
+                / 120.0)
+                .clamp(0.0, 1.0)
+        } else if !shell::settings(page) {
             0.0
         } else if shell::wide(w, h) {
             1.0
@@ -708,28 +737,40 @@ impl App {
     }
     fn route_key(&self) -> String {
         format!(
-            "{}:{}",
+            "{}:{}:{}",
             s(&self.data, "page"),
             if s(&self.data, "page") == "songs" {
                 s(&self.data, "detailTitle")
             } else {
                 ""
-            }
+            },
+            s(&self.data, "page") == "songs" && self.detail_artists
         )
     }
     fn source(&self, id: &str) -> &[Value] {
         self.data[id].as_array().map(Vec::as_slice).unwrap_or(&[])
     }
     fn act(&mut self, action: &str) {
+        if let Some(artist) = action.strip_prefix("artist-search:") {
+            post(json!({"type":"search","query":artist}));
+            return;
+        }
+        if action == "detail-songs" || action == "detail-artists" {
+            self.save_scroll();
+            self.detail_artists = action == "detail-artists";
+            self.paint_content();
+            return;
+        }
         if action.starts_with("navigate:") {
             if &action[9..] == s(&self.data, "page") {
                 return;
             }
-            self.route_direction = if matches!(&action[9..], "home" | "mine" | "settings") {
-                0.0
-            } else {
-                1.0
-            };
+            self.route_direction =
+                if matches!(&action[9..], "home" | "collection" | "mine" | "settings") {
+                    0.0
+                } else {
+                    1.0
+                };
             self.save_scroll();
             post(json!({"type":"navigate","page":&action[9..]}));
             return;
@@ -923,7 +964,9 @@ impl App {
             "mode" => post(json!({"type":"cycle_mode"})),
             "fallback" => post(json!({"type":"toggle_fallback"})),
             "daily" | "login" | "refresh_home" | "refresh_library" | "retry_playlist"
-            | "clear_search" | "dismiss_login" | "load_more" => post(json!({"type":action})),
+            | "clear_search" | "dismiss_login" | "load_more" | "retry_lyrics" => {
+                post(json!({"type":action}))
+            }
             "search_submit" => {
                 if let Some(input) =
                     el("search-input").and_then(|e| e.dyn_into::<HtmlInputElement>().ok())
@@ -1032,6 +1075,7 @@ impl App {
         self.painted_route = route;
         let mut input = self.data.clone();
         input["filter"] = json!(self.filter);
+        input["detailArtists"] = json!(self.detail_artists);
         input["visibleLimit"] = json!(*self.limits.get(&self.route_key()).unwrap_or(&100));
         if let Ok(presentation) = presentation::screen(&input) {
             set_html("header", &render::header(&presentation, &self.data));
@@ -1150,7 +1194,8 @@ impl App {
         self.paint_progress();
         self.scrolled();
     }
-    fn paint_mini(&self) {
+    fn paint_mini(&mut self) {
+        self.mini_lines = parse_lrc(s(&self.data, "lyrics"));
         set_html("mini-player", &render::mini(&self.live, &self.data));
     }
     fn paint_player(&mut self) {
@@ -1229,6 +1274,24 @@ impl App {
                     .collect()
             })
             .collect();
+        self.glyph_geometry = self
+            .glyph_nodes
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|word| {
+                        let mut x = 0.0;
+                        word.iter()
+                            .map(|glyph| {
+                                let left = x;
+                                x += glyph.offset_width() as f64;
+                                (left, x)
+                            })
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect();
         self.lyric_viewport = el("lyric-viewport").and_then(|e| e.dyn_into().ok());
         self.word_nodes = self
             .word_lines
@@ -1259,7 +1322,12 @@ impl App {
         }
         set_html(
             "lyric-lines",
-            &render::lyrics(&self.lines, &self.translations, &self.word_lines),
+            &render::lyrics(
+                &self.lines,
+                &self.translations,
+                &self.word_lines,
+                &self.data,
+            ),
         );
         self.lyrics_mounted = true;
         self.cache_lyric_nodes();
@@ -1293,8 +1361,9 @@ impl App {
     fn dock_index(&self) -> usize {
         match s(&self.data, "page") {
             "home" => 0,
-            "mine" => 1,
-            _ => 2,
+            "collection" => 1,
+            "mine" => 2,
+            _ => 3,
         }
     }
     fn dock_slot(&self) -> String {
@@ -1400,6 +1469,13 @@ impl App {
             if (value - self.mini_written).abs() > 0.0004 {
                 self.mini_written = value;
                 style(&mini, "--mini", &format!("{value:.4}"));
+                if let Some(actions) = el("float-actions") {
+                    style(
+                        &actions,
+                        "transform",
+                        &format!("translateY({}px)", -134.0 * value),
+                    );
+                }
             }
         }
     }
@@ -1761,6 +1837,19 @@ impl App {
         self.apply_overlay();
     }
     fn paint_progress(&self) {
+        if let Some(caption) = el("mini-caption") {
+            let at = n(&self.live, "position");
+            let line = self
+                .mini_lines
+                .iter()
+                .rev()
+                .find(|(t, _)| *t <= at)
+                .map(|(_, s)| s.as_str())
+                .unwrap_or(s(&self.live, "artist"));
+            if caption.text_content().as_deref() != Some(line) {
+                caption.set_text_content(Some(line));
+            }
+        }
         let duration = n(&self.live, "duration").max(0);
         let position = n(&self.live, "position").clamp(0, duration.max(1));
         let fraction = if duration > 0 {
@@ -1829,26 +1918,54 @@ impl App {
                         if let Some(glyphs) = self.glyph_nodes.get(index).and_then(|row| row.get(j))
                         {
                             for (k, glyph) in glyphs.iter().enumerate() {
-                                let reveal_units =
-                                    (fill * glyphs.len() as i32 - k as i32 * 1000).clamp(0, 1000);
                                 if let Some(previous) = self
                                     .glyph_fills
                                     .get_mut(index)
                                     .and_then(|row| row.get_mut(j))
                                     .and_then(|word| word.get_mut(k))
                                 {
-                                    if *previous == reveal_units {
+                                    if *previous == fill {
                                         continue;
                                     }
-                                    *previous = reveal_units;
+                                    *previous = fill;
                                 }
-                                let effect = karaoke::effect(
+                                let mut effect = karaoke::effect(
                                     fill as f64 / 1000.0,
                                     k,
                                     glyphs.len(),
-                                    word.end - word.start,
+                                    if karaoke::eligible(word) {
+                                        word.end - word.start
+                                    } else {
+                                        0
+                                    },
                                     self.reduced,
                                 );
+                                let font = customization::get(&self.data, "lyricSize")
+                                    .parse::<f64>()
+                                    .unwrap_or(24.0);
+                                let bounds = self.glyph_geometry.get(index).and_then(|r| r.get(j));
+                                let reveal = bounds
+                                    .and_then(|g| {
+                                        g.get(k).map(|&(left, right)| {
+                                            karaoke::spatial_reveal(
+                                                fill as f64 / 1000.0,
+                                                left,
+                                                right,
+                                                g.last().map(|g| g.1).unwrap_or(1.0),
+                                                font,
+                                                effect.scale,
+                                            )
+                                        })
+                                    })
+                                    .unwrap_or(
+                                        (fill as f64 / 1000.0 * glyphs.len() as f64 - k as f64)
+                                            .clamp(0.0, 1.0),
+                                    );
+                                if !self.reduced {
+                                    effect.lift = -(4.0 / 72.0)
+                                        * (1.0 - (reveal * std::f64::consts::PI).cos())
+                                        / 2.0;
+                                }
                                 let _ = glyph.style().set_property(
                                     "transform",
                                     &format!(
@@ -1859,9 +1976,10 @@ impl App {
                                 let _ = glyph
                                     .style()
                                     .set_property("--glyph-glow", &format!("{:.4}", effect.glow));
-                                let reveal = (fill as f64 / 1000.0 * glyphs.len() as f64
-                                    - k as f64)
-                                    .clamp(0.0, 1.0);
+                                let _ = glyph.style().set_property(
+                                    "--glyph-radius",
+                                    &format!("{}px", effect.radius * font / 72.0),
+                                );
                                 let _ = glyph.style().set_property(
                                     "--glyph-fill",
                                     &format!("{:.2}%", reveal * 116.0 - 8.0),
@@ -1922,6 +2040,7 @@ impl App {
             }
             if near_bottom
                 && page == "songs"
+                && !self.detail_artists
                 && b(&self.data, "detailHasMore")
                 && !b(&self.data, "detailLoadingMore")
                 && !b(&self.data, "detailLoading")
@@ -1947,7 +2066,8 @@ impl App {
     /// Data source of the currently rendered long list; empty when the page has none.
     fn list_source(&self) -> &'static str {
         match s(&self.data, "page") {
-            "songs" => "tracks",
+            "songs" if !self.detail_artists => "tracks",
+            "collection" => "likes",
             "recent" => "recent",
             "home" => "discovery",
             "search" => "search",

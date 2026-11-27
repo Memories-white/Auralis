@@ -47,7 +47,7 @@ const live={mid:'motion',title:'Motion study',artist:'Auralis',cover:'https://ex
   data.colorMode='dark';
   await page.evaluate(data=>auralisUpdate(JSON.stringify({type:'content',state:data})),data);
   await page.waitForTimeout(400);await page.screenshot({path:path.join(output,tag+'-dock-dark.png')});
-  for(const [bar,mini,nav,width] of [['floating',68,52,192],['normal',68,64,411]]){
+  for(const [bar,mini,nav,width] of [['floating',64,64,379],['normal',68,64,411]]){
    data.uiPreferences={bar};await page.evaluate(data=>auralisUpdate(JSON.stringify({type:'content',state:data})),data);
    const size=await page.evaluate(()=>({mini:document.querySelector('#mini-player').getBoundingClientRect().height,nav:document.querySelector('#navigation').getBoundingClientRect().height,width:document.querySelector('#navigation').getBoundingClientRect().width}));
    assert.deepEqual(size,{mini,nav,width});

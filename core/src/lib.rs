@@ -13,6 +13,7 @@ use std::{
 
 const GATEWAY: &str = "https://u.y.qq.com/cgi-bin/musicu.fcg";
 mod discovery;
+mod lyric_cache;
 mod playback_controls;
 mod artwork;
 mod qrc;
@@ -510,6 +511,18 @@ fn lyrics(mid: &str, id: u64, cookies: &Value) -> Result<Value, String> {
     let plain=if words.is_empty(){decode(field(info,"lyric"))}else{qrc::lrc(&words)};
     Ok(json!({"lyric":plain,"translation":decode(field(info,"trans")),"wordLyrics":words}))
 }
+fn cached_lyrics(v: &Value) -> Result<Value, String> {
+    let mid = field(v, "mid");
+    let root = field(v, "cacheDir");
+    if !v["force"].as_bool().unwrap_or(false) {
+        if let Some(data) = lyric_cache::read(root, mid) {
+            return Ok(data);
+        }
+    }
+    let data = lyrics(mid, v["id"].as_u64().unwrap_or(0), &v["session"]["cookies"])?;
+    lyric_cache::write(root, mid, &data);
+    Ok(data)
+}
 fn account_request(session: &Value, requests: Value) -> Result<Value, String> {
     if field(session, "musicKey").is_empty() {
         return Err("请先登录音乐服务账号".into());
@@ -782,11 +795,8 @@ pub fn dispatch(command: &str, input: &str) -> String {
                 &v["session"]["cookies"],
             ),
             "play_url" => play_url(&v["song"], &v["session"], field(&v,"quality"), v["fallback"].as_bool().unwrap_or(true)),
-            "lyrics" => lyrics(
-                field(&v, "mid"),
-                v["id"].as_u64().unwrap_or(0),
-                &v["session"]["cookies"],
-            ),
+            "lyrics" => cached_lyrics(&v),
+            "lyrics_cache_read"=>Ok(lyric_cache::read(field(&v,"cacheDir"),field(&v,"mid")).unwrap_or(Value::Null)),
             _ => Err("未知命令".into()),
         }
     })();
@@ -842,6 +852,16 @@ pub extern "system" fn Java_dev_qqlyric_app_RustCore_call(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn paused_song_lyrics_are_available_without_session_or_playback(){
+        let dir=std::env::current_dir().unwrap().join("target").join(format!("restore-lyrics-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let root=dir.to_str().unwrap();
+        let lyric=serde_json::json!({"lyric":"[00:00.000]Still here","translation":"[00:00.000]依然在这里","wordLyrics":[]});
+        assert!(super::lyric_cache::write(root,"paused-song",&lyric));
+        let request=serde_json::json!({"mid":"paused-song","cacheDir":root});
+        assert_eq!(super::cached_lyrics(&request).unwrap(),lyric);
+        let _=std::fs::remove_dir_all(dir);
+    }
     use super::*;
     #[test]
     fn profile_uses_nonempty_avatar_and_qq_fallback() {

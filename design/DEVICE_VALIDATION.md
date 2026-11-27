@@ -1,3 +1,13 @@
+# v0.5.7-preview 恢复歌词与参考界面（2026-11-27）
+
+- Rust UI30、core44和Java4组通过，含无需session/播放的缓存恢复与损坏/限额检查；完整Rust/WASM、NDK和Gradle构建通过。APK code34、原证书v2通过，哈希在docs/HANDOFF.md。
+- 真实WASM验证暂停恢复loading/ready、加载失败重试、四栏导航、展开歌曲栏五个按钮边界、歌单艺术家标签和搜索事件；原700首分页、封面复用、共享封面转场、触屏切页、歌词跟随、音效与关于/许可回归通过。
+- 本地夹具截图复核mini-expanded-light.png、playlist-long.png、about-dark.png、karaoke-spatial.png与motion/melox-057-final-dock-dark.png；未上传个人截图。样式lint0错误0警告。
+- 浏览器探针68回调、间隔中位约16.7ms/P95约16.8ms；仅反映本机Chromium任务，不代表手机呈现帧率。悬浮模式尺寸探针mini64/nav64/宽379（411px视口）。
+- 手机由用户后续通知连接；本轮没有安装或测量手机。保留账号/播放数据，未创建Release；源码推送与本地APK分开。
+
+---
+
 # v0.5.6-preview Miuix 设置与交互（2026-11-27）
 
 - Rust UI30、核心42、Java4组通过；完整WASM/NDK/Gradle构建和APK v2签名通过，code33，沿用原debug证书。本地包哈希和源码基线见docs/HANDOFF.md，未创建Release。

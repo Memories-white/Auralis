@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Word motion adapted from Melox LyricsView.kt, Melox contributors.
+// Revision bfe7c5dc467b84d7a9df8e63c93208a3e6f61672; Rust and DOM geometry adaptations.
 //! Genuine word timing only: ordinary LRC never gets fabricated word timestamps.
 use serde_json::Value;
 #[derive(Clone, Debug)]
@@ -75,6 +78,7 @@ pub struct Effect {
     pub lift: f64,
     pub scale: f64,
     pub glow: f64,
+    pub radius: f64,
 }
 pub fn effect(progress: f64, piece: usize, count: usize, duration: i32, reduced: bool) -> Effect {
     if reduced {
@@ -82,31 +86,95 @@ pub fn effect(progress: f64, piece: usize, count: usize, duration: i32, reduced:
             lift: 0.0,
             scale: 1.0,
             glow: 0.0,
+            radius: 0.0,
         };
     }
-    let p = (progress * count.max(1) as f64 - piece as f64).clamp(0.0, 1.0);
-    let reveal = p * p * (3.0 - 2.0 * p);
+    // Melox LyricsView.kt (Apache-2.0): staggered, overlapping character windows.
+    let count = count.max(1);
+    let window = if count <= 10 {
+        0.68
+    } else {
+        4.0 / (count as f64 + 3.0)
+    };
+    let ratio = if count > 1 {
+        piece as f64 / (count - 1) as f64
+    } else {
+        0.5
+    };
+    let p = ((progress - (1.0 - window) * ratio) / window).clamp(0.0, 1.0);
+    let reveal = (progress * count as f64 - piece as f64).clamp(0.0, 1.0);
+    let reveal = (1.0 - (reveal * std::f64::consts::PI).cos()) / 2.0;
     let pulse = (std::f64::consts::PI * p).sin().max(0.0).powi(2);
     // Long sustained words get a soft swell; short syllables only rise with reveal.
-    let sustained = ((duration as f64 - 650.0) / 700.0).clamp(0.0, 1.0);
+    let ratio = ((duration as f64 - 1000.0) / 2000.0).clamp(0.0, 1.0);
+    let intensity = ratio * ratio * (3.0 - 2.0 * ratio);
+    let sustained = duration >= 1000;
     Effect {
-        lift: -0.065 * reveal,
-        scale: 1.0 + 0.11 * pulse * sustained,
-        glow: 0.48 * pulse * sustained,
+        lift: -(4.0 / 72.0) * reveal,
+        scale: if sustained {
+            1.0 + (0.06 + 0.06 * intensity) * pulse
+        } else {
+            1.0
+        },
+        glow: if sustained {
+            (0.42 + 0.2 * intensity) * pulse
+        } else {
+            0.0
+        },
+        radius: 7.0 + 5.0 * intensity,
     }
+}
+/// Feather reveal over the measured, scale-expanded glyph bounds. Geometry is
+/// captured once after mounting, never read from layout in the animation loop.
+pub fn spatial_reveal(
+    progress: f64,
+    left: f64,
+    right: f64,
+    total: f64,
+    font: f64,
+    scale: f64,
+) -> f64 {
+    let width = (right - left).max(0.001) * scale;
+    let left = (left + right - width) / 2.0;
+    let feather = (font * 0.25).max(0.001);
+    ((progress.clamp(0.0, 1.0) * (total + feather) - left) / (width + feather)).clamp(0.0, 1.0)
+}
+pub fn eligible(word: &Word) -> bool {
+    let visible = word
+        .text
+        .chars()
+        .filter(|c| !c.is_whitespace() && !c.is_ascii_punctuation())
+        .count()
+        .max(1);
+    let duration = word.end - word.start;
+    duration >= 1000
+        && (word
+            .text
+            .chars()
+            .any(|c| ('\u{3400}'..='\u{9fff}').contains(&c))
+            || duration as f64 / visible as f64 > 200.0)
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn reveal_has_spatial_lift_swell_and_stable_endpoints() {
+        let peak = effect(0.5, 0, 1, 3000, false);
+        assert!((peak.scale - 1.12).abs() < 1e-9);
+        assert!((peak.glow - 0.62).abs() < 1e-9);
+        assert_eq!(spatial_reveal(0.0, 0.0, 10.0, 50.0, 24.0, 1.0), 0.0);
+        assert_eq!(spatial_reveal(1.0, 40.0, 50.0, 50.0, 24.0, 1.0), 1.0);
+        assert!(
+            spatial_reveal(0.5, 0.0, 30.0, 50.0, 24.0, 1.0)
+                > spatial_reveal(0.5, 30.0, 35.0, 50.0, 24.0, 1.0)
+        );
         let a = effect(0.25, 0, 2, 1800, false);
         let b = effect(0.25, 1, 2, 1800, false);
-        assert!(a.lift < 0.0 && a.scale > 1.09 && a.glow > 0.4);
+        assert!(a.lift < 0.0 && a.scale > 1.06 && a.glow > 0.3);
         assert_eq!(b.lift, 0.0);
         assert_eq!(b.scale, 1.0);
         let end = effect(1.0, 0, 2, 1800, false);
-        assert_eq!(end.lift, -0.065);
+        assert_eq!(end.lift, -4.0 / 72.0);
         assert!((end.scale - 1.0).abs() < 1e-9);
         assert_eq!(effect(0.25, 0, 2, 1800, true).lift, 0.0);
         assert_eq!(pieces("你好!").len(), 3);

@@ -13,8 +13,8 @@ pub const OPTIONS: &[OptionSpec] = &[
         key: "bar",
         title: "底栏样式",
         values: &[
-            ("normal", "标准导航栏", "Miuix 图标与文字导航"),
-            ("floating", "悬浮导航栏", "Miuix 紧凑图标导航"),
+            ("normal", "标准导航栏", "Melox 四栏导航与磨砂歌曲栏"),
+            ("floating", "悬浮导航栏", "圆角悬浮导航，保留图标与文字"),
         ],
         default: "normal",
     },

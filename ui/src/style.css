@@ -1650,7 +1650,7 @@ h1 {
 .karaoke-word {display:inline-block;white-space:pre;max-width:100%;}
 .karaoke-glyph {display:inline-block;white-space:pre;transform-origin:center bottom;}
 .lyric-line.active .karaoke-word {background:none;color:inherit;-webkit-text-fill-color:inherit;}
-.lyric-line.active .karaoke-glyph {background:linear-gradient(90deg,var(--fg) calc(var(--glyph-fill,-8%) - 7%),color-mix(in srgb,var(--fg) 42%,transparent) calc(var(--glyph-fill,-8%) + 7%));background-clip:text;-webkit-background-clip:text;color:transparent;-webkit-text-fill-color:transparent;text-shadow:0 0 10px color-mix(in srgb,var(--fg) calc(var(--glyph-glow,0) * 100%),transparent);}
+.lyric-line.active .karaoke-glyph {background:linear-gradient(90deg,var(--fg) calc(var(--glyph-fill,-8%) - 7%),color-mix(in srgb,var(--fg) 42%,transparent) calc(var(--glyph-fill,-8%) + 7%));background-clip:text;-webkit-background-clip:text;color:transparent;-webkit-text-fill-color:transparent;text-shadow:0 0 var(--glyph-radius,4px) color-mix(in srgb,var(--fg) calc(var(--glyph-glow,0) * 100%),transparent);}
 .lyric-line:not(.active) .karaoke-glyph,.reduced-motion .karaoke-glyph {transform:none!important;text-shadow:none;}
 
 /* Grouped translucent action/effect panels; local-file editing is intentionally absent. */
@@ -1769,3 +1769,63 @@ h1 {
 #app[data-wide="true"] #player .player-safe {max-width:680px;margin:auto;}
 #app[data-wide="true"] .shelf-card {flex-basis:174px;}
 @supports(corner-shape:squircle){#app[data-settings-shell="true"] .card,.mini,.about-logo,.license-document {corner-shape:squircle;}}
+
+/* Melox reference skin. Rust owns spring progress, routing and scroll fades. */
+.mini {width:calc(100% - 12px);margin:0 6px 6px;border:1px solid color-mix(in srgb,var(--fg) 9%,transparent);border-radius:24px;background:color-mix(in srgb,var(--bg) 88%,transparent);box-shadow:none;}
+#app[data-ui-blur="on"] .mini {backdrop-filter:blur(24px) saturate(1.15);}
+.mini-identity {padding-left:10px;padding-right:10px;gap:12px;}
+.mini-art {border-radius:8px;box-shadow:none;}
+.mini-meta strong {font-size:16px;font-weight:550;}
+.mini-meta small {font-size:12px;line-height:18px;}
+.mini-compact .icon-button {width:40px;height:44px;flex-basis:40px;}
+.mini-compact svg {width:25px;height:25px;}
+.mini-line {display:none;}
+.mini-expanded {top:76px;bottom:10px;left:18px;right:18px;justify-content:space-between;gap:0;}
+.mini-five {display:flex;align-items:center;justify-content:space-between;min-height:56px;gap:4px;}
+.mini-five .icon-button {width:44px;height:48px;flex-basis:44px;}
+.mini-five .icon-button:nth-child(3) {width:56px;height:56px;flex-basis:56px;}
+.mini-five svg {width:24px;height:24px;}
+.mini-five .icon-button:nth-child(3) svg {width:32px;height:32px;}
+#float-actions {bottom:calc(var(--dock-clearance) - 2px);right:16px;will-change:transform;}
+#navigation {border-top:1px solid color-mix(in srgb,var(--fg) 7%,transparent);}
+#app[data-ui-bar="normal"] #dock {background:transparent;}
+#app[data-ui-blur="on"][data-ui-bar="normal"] #dock {background:transparent;backdrop-filter:none;}
+#app[data-ui-blur="on"][data-ui-bar="normal"] #navigation {background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(24px);}
+#app[data-ui-bar="floating"] #navigation {width:min(calc(100% - 32px),var(--floating-width,408px));height:64px;min-height:64px;gap:0;padding:0 4px;border:1px solid color-mix(in srgb,var(--fg) 9%,transparent);border-radius:32px;}
+#app[data-ui-bar="floating"] .nav-item {flex:1 1 0;width:auto;height:64px;min-height:64px;padding:8px 0;}
+#app[data-ui-bar="floating"] .nav-item>span:not(.nav-glyph) {display:block;}
+#app[data-ui-bar="floating"][data-ui-navlabels="off"] .nav-item>span:not(.nav-glyph) {display:none;}
+#app[data-ui-bar="floating"] .nav-glyph,#app[data-ui-bar="floating"] .nav-glyph>svg {width:26px;height:26px;}
+#app[data-ui-bar="floating"] .mini {--mini-base:64px;--mini-extra:138px;--mini-art-size:44px;width:min(calc(100% - 32px),var(--floating-width,408px));margin:0 16px 8px;}
+#app[data-route="songs"] #header {padding:calc(var(--safe-top) + 4px) 16px 4px;}
+#app[data-route="songs"] #header .large-title {display:none;}
+#app[data-route="songs"] #header .compact-title {font-size:17px;}
+.playlist-overview {margin:0 16px 18px;padding:16px 0 0;background:transparent;border-radius:0;box-shadow:none;}
+.playlist-hero {display:flex;align-items:center;gap:16px;min-width:0;margin:0 0 12px;}
+.playlist-hero>.artwork {width:96px;flex:0 0 96px;border-radius:14px;}
+.playlist-hero>div {flex:1;min-width:0;}
+.playlist-hero h2 {font-size:21px;font-weight:650;line-height:1.35;overflow-wrap:anywhere;}
+.playlist-hero p {font-size:13px;line-height:1.6;color:var(--muted);margin-top:8px;}
+.playlist-overview>.row {gap:12px;}
+.playlist-overview .button {min-height:40px;border-radius:20px;font-size:14px;}
+.playlist-tabs {margin:0 12px 18px;padding:3px;border-radius:24px;background:color-mix(in srgb,var(--fg) 12%,transparent);}
+.playlist-tabs button {min-height:36px;border-radius:20px;background:transparent;border:0;padding:8px 4px;}
+.playlist-tabs button.selected {color:var(--fg);background:color-mix(in srgb,var(--fg) 13%,transparent);}
+#app[data-route="songs"] .song-row {width:calc(100% - 16px);margin:0 8px;padding:10px 8px;gap:12px;min-height:68px;}
+#app[data-route="songs"] .song-row .artwork {width:48px;border-radius:7px;}
+#app[data-route="songs"] .song-row strong {font-size:16px;font-weight:500;}
+#app[data-route="songs"] .song-row small {font-size:13px;}
+#app[data-route="songs"] .song-duration {display:block;flex-shrink:0;}
+.artist-list {margin:0 16px;}
+.artist-note {color:var(--muted);font-size:12px;padding:0 8px 8px;}
+.artist-row {display:flex;align-items:center;width:100%;gap:14px;min-height:64px;padding:12px 8px;background:transparent;text-align:left;}
+.artist-row>span {flex:1;min-width:0;overflow-wrap:anywhere;}
+.artist-row>svg {color:var(--muted);}
+#app[data-route="about"] #content {background:radial-gradient(ellipse at 50% 15%,color-mix(in srgb,var(--primary) 17%,transparent),transparent 55%);}
+.about-identity {position:sticky;top:0;height:414px;justify-content:flex-start;padding:44px 28px 80px;margin-bottom:32px;gap:0;z-index:0;pointer-events:none;}
+.about-logo {width:112px;height:112px;flex:0 0 112px;border-radius:30px;color:var(--fg);background:color-mix(in srgb,var(--primary) 14%,var(--card));margin-bottom:12px;}
+.about-identity h2 {font-size:35px;line-height:46px;font-weight:750;margin-bottom:5px;}
+.about-identity p {display:none;}
+.about-version {font-size:14px;line-height:20px;padding:0;}
+#app[data-route="about"] .preference-group,#app[data-route="about"] .card {position:relative;z-index:1;}
+#app[data-wide="true"] .mini {width:100%;margin:0;}

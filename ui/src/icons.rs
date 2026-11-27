@@ -1,16 +1,16 @@
-//! Inline SVG glyphs for the Rust renderer. Navigation keeps one glyph and uses
-//! the Miuix selected/pressed color-alpha contract instead of cross-fading fills.
+//! Inline SVG glyphs for the Rust renderer, including Melox-style filled destinations.
 fn stroke(name: &str) -> Option<(&'static str, bool)> {
     let path = match name {
         "home" => "M3 10.5 12 3l9 7.5M5.5 9v12h5v-7h3v7h5V9",
         "home-filled" => "M3 10.2 12 3l9 7.2V21h-6v-6h-6v6H3Z",
         "library" => "M4 4v16M8 4v16M12 4l5 16M20 4v16",
-        "library-filled" => "M3 4h3v16H3ZM7.5 4h3v16h-3ZM12.7 4.3l3-.8 4.2 15.4-3 .8Z",
+        "library-filled" => "M5 3h15v16H7a2 2 0 0 0 0 4H4V6a3 3 0 0 1 1-3ZM12.5 6l1.3 2.7 3 .4-2.2 2.1.5 3-2.6-1.4-2.6 1.4.5-3-2.2-2.1 3-.4Z",
         "settings" => "m12 3 2 3 3 .5 1 3 2 2-2 2-1 3-3 .5-2 3-2-3-3-.5-1-3-2-2 2-2 1-3L10 6Z M15 12a3 3 0 1 0-6 0 3 3 0 0 0 6 0",
-        "settings-filled" => "M10.6 2h2.8l.5 2.3 1.6.7 2-1.2 2 2-1.2 2 .7 1.6 2.3.5v2.8l-2.3.5-.7 1.6 1.2 2-2 2-2-1.2-1.6.7-.5 2.3h-2.8l-.5-2.3-1.6-.7-2 1.2-2-2 1.2-2-.7-1.6L2 13.4v-2.8l2.3-.5.7-1.6-1.2-2 2-2 2 1.2 1.6-.7Z M15.2 12a3.2 3.2 0 1 0-6.4 0 3.2 3.2 0 0 0 6.4 0Z",
+        "settings-filled" => "M12 2 21 7v10l-9 5-9-5V7Z M16 12a4 4 0 1 0-8 0 4 4 0 0 0 8 0Z",
         "search" => "M16.5 16.5 22 22M19 10.5a8.5 8.5 0 1 0-17 0 8.5 8.5 0 0 0 17 0",
         "heart" | "favorite" => "M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z",
         "music" => "M9 17V5l11-2v12M9 17a3 3 0 1 1-3-3c1.7 0 3 1.3 3 3M20 15a3 3 0 1 1-3-3c1.7 0 3 1.3 3 3",
+        "music-filled" => "M8 5 21 2v14a3.5 3.5 0 1 1-2-3.16V7L10 9v10a3.5 3.5 0 1 1-2-3.16Z",
         "account" => "M16 7a4 4 0 1 0-8 0 4 4 0 0 0 8 0M4 22v-2a8 8 0 0 1 16 0v2",
         "clock" | "timer" => "M21 12a9 9 0 1 0-18 0 9 9 0 0 0 18 0M12 7v6l4 2",
         "pause" => "M8 5v14M16 5v14",
@@ -55,13 +55,16 @@ fn stroke(name: &str) -> Option<(&'static str, bool)> {
         "volume" => "M4 10v4h3l4 4V6L7 10ZM16 9a4 4 0 0 1 0 6M18.5 6.5a7 7 0 0 1 0 11",
         _ => return None,
     };
-    Some((path, matches!(name, "play" | "previous" | "next")))
+    Some((
+        path,
+        name.ends_with("-filled") || matches!(name, "play" | "previous" | "next"),
+    ))
 }
 
 pub fn icon(name: &str) -> String {
     let (path, filled) = stroke(name).unwrap_or(("M12 4v16M4 12h16", false));
     format!(
-        "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\" fill=\"{}\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"{path}\"/></svg>",
+        "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\" fill=\"{}\" fill-rule=\"evenodd\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"{path}\"/></svg>",
         if filled { "currentColor" } else { "none" }
     )
 }

@@ -20,6 +20,10 @@ class MusicState(private val context:Context,private val protocol:(String,String
     private val worker=Executors.newSingleThreadExecutor()
     private val feedWorker=Executors.newSingleThreadExecutor()
     private val detailWorker=Executors.newSingleThreadExecutor()
+    private val lyricWorker=Executors.newSingleThreadExecutor()
+    private var lyricMid=""
+    private var lyricGeneration=0
+    var lyricState by mutableStateOf("idle")
     /** Songs requested per playlist page; the page keeps loading while the user scrolls. */
     private val trackPageSize=100
     private val ui=Handler(Looper.getMainLooper())
@@ -135,8 +139,9 @@ class MusicState(private val context:Context,private val protocol:(String,String
     }
     private fun call(name:String,args:JSONObject=JSONObject(),done:(JSONObject)->Unit){
         val expected=epoch
+        if(name=="lyrics"||name=="lyrics_cache_read")args.put("cacheDir",java.io.File(context.cacheDir,"lyrics").absolutePath)
         val input=args.toString()
-        (when(name){"recommend"->feedWorker;"guess","playlist","playlist_page","playlist_all"->detailWorker;else->worker}).execute{
+        (when(name){"lyrics","lyrics_cache_read"->lyricWorker;"recommend"->feedWorker;"guess","playlist","playlist_page","playlist_all"->detailWorker;else->worker}).execute{
             val response=runCatching{JSONObject(protocol(name,input))}.getOrElse{JSONObject().put("ok",false).put("error",it.message?:context.getString(R.string.request_failed))}
             ui.post{if(alive&&expected==epoch)done(response)}
         }
@@ -190,13 +195,14 @@ class MusicState(private val context:Context,private val protocol:(String,String
     fun navigate(destination:String){
         if(destination==page)return
         playlistGeneration++;searchGeneration++
-        if(destination!="songs")cancelDetail()
-        if(destination=="home"||destination=="mine"||destination=="settings")backStack.clear() else backStack.add(page)
+        if(destination=="search"){detailLoading=false;detailLoadingMore=false}
+        else if(destination!="songs")cancelDetail()
+        if(destination=="home"||destination=="collection"||destination=="mine"||destination=="settings")backStack.clear() else backStack.add(page)
         page=destination;status="";busy=false
-        if(destination=="mine"&&loggedIn&&(library.length()==0||libraryFromCache))refreshLibrary()
+        if((destination=="mine"||destination=="collection")&&loggedIn&&(library.length()==0||libraryFromCache))refreshLibrary()
     }
     private fun cancelDetail(){detailLoading=false;detailError="";detailRequest=null;detailHasMore=false;detailLoadingMore=false;detailTotal=0}
-    fun back(){playlistGeneration++;searchGeneration++;cancelDetail();page=if(backStack.isNotEmpty())backStack.removeAt(backStack.lastIndex)else "home";status="";busy=false}
+    fun back(){playlistGeneration++;searchGeneration++;val target=if(backStack.isNotEmpty())backStack.removeAt(backStack.lastIndex)else "home";if(target!="songs")cancelDetail();page=target;status="";busy=false}
     fun openSongs(songs:List<JSONObject>,label:String,cover:String=""){playlistGeneration++;cancelDetail();if(page!="songs")parentPage=page;detailTitle=label;detailCover=cover.ifBlank{songs.firstOrNull()?.artwork().orEmpty()};tracks=songs;detailTotal=songs.size;detailRevision++;navigate("songs")}
     fun daily(){
         val songs=home.optJSONArray("daily")?.objects().orEmpty()
@@ -370,6 +376,21 @@ class MusicState(private val context:Context,private val protocol:(String,String
         for(i in extras.indices step 2){if(i+1>=extras.size)break;val key=extras[i] as String;val value=extras[i+1];if(value is Int)intent.putExtra(key,value)else intent.putExtra(key,value.toString())}
         if(action=="PLAY")context.startForegroundService(intent)else context.startService(intent)
     }
+    fun retryLyrics(){lyricMid="";ensureLyrics()}
+    private fun ensureLyrics(){
+        if(mid.isBlank()||lyricMid==mid)return
+        val target=mid;val generation=++lyricGeneration
+        lyricMid=target;lyrics="";translation="";wordLyrics="[]";lyricState="loading"
+        val song=queue.firstOrNull{it.optString("mid")==target}
+        call("lyrics",JSONObject().put("mid",target).put("id",song?.optLong("id")?:0L).put("session",session)){result->
+            if(generation!=lyricGeneration||mid!=target)return@call
+            val data=result.optJSONObject("data")
+            if(result.optBoolean("ok")&&data!=null){
+                lyrics=data.optString("lyric");translation=data.optString("translation");wordLyrics=data.optJSONArray("wordLyrics")?.toString()?:"[]"
+                lyricState=if(lyrics.isBlank())"empty" else "ready"
+            }else lyricState="error"
+        }
+    }
     fun sample(){
         val state=PlayerService.snapshot
         sleepRemainingSeconds=state.sleepRemainingSeconds;sleepAfterTrack=state.sleepAfterTrack;sleepFinished=state.sleepFinished;sleepMinutes=state.sleepMinutes
@@ -380,7 +401,7 @@ class MusicState(private val context:Context,private val protocol:(String,String
                 mid=saved.song.optString("mid");title=saved.song.optString("title");artist=saved.song.optString("artist");cover=saved.song.artwork()
                 queue=saved.queue;currentIndex=saved.index;position=saved.position;duration=saved.duration
             }?:run{mid="";title="";artist="";cover="";currentIndex=-1;position=0;duration=0}
-            lyrics="";translation="";wordLyrics="[]"
+            ensureLyrics()
             playing=false;actualQuality="";qualityPending=false;qualityDowngraded=false
             return
         }
@@ -389,7 +410,10 @@ class MusicState(private val context:Context,private val protocol:(String,String
         currentIndex=state.index
         mid=state.mid;title=state.title;artist=state.artist;cover=state.artwork
         playing=state.playing;position=state.position;duration=state.duration
-        lyrics=state.lyric;translation=state.translation;wordLyrics=state.wordLyrics
+        if(state.lyric.isNotBlank()){
+            if(lyricMid!=mid){lyricGeneration++;lyricMid=mid}
+            lyrics=state.lyric;translation=state.translation;wordLyrics=state.wordLyrics;lyricState="ready"
+        }else ensureLyrics()
         actualQuality=state.quality;qualityPending=state.qualityPending;qualityDowngraded=state.downgraded
         val serviceError=displayError(state.error)
         if(serviceError.isNotBlank()){status=serviceError;playbackStatus=serviceError}else if(lastServiceError.isNotBlank()){
@@ -484,5 +508,5 @@ class MusicState(private val context:Context,private val protocol:(String,String
     }
     fun dismissLogin(){loginGeneration++;qrOpen=false;qrImage=""}
     fun logout(){catalogPrefs.edit().clear().apply();cancelDetail();homeGeneration++;feedGeneration++;discoverySongs=emptyList();discoveryLoading=false;discoveryMore=true;discoveryError="";collectionBusy=false;collectionMessage="";epoch++;loginGeneration++;playGeneration++;pendingMid=null;pendingToken=null;backStack.clear();secure.clear();session=JSONObject();profile=JSONObject();loggedIn=false;home=JSONObject();library=JSONObject();page="home";status=context.getString(R.string.logged_out);playbackStatus="";command("STOP")}
-    fun close(){prefs.unregisterOnSharedPreferenceChangeListener(historyListener);playbackPrefs.unregisterOnSharedPreferenceChangeListener(playbackListener);alive=false;loginGeneration++;worker.shutdownNow();feedWorker.shutdownNow();detailWorker.shutdownNow();ui.removeCallbacksAndMessages(null)}
+    fun close(){prefs.unregisterOnSharedPreferenceChangeListener(historyListener);playbackPrefs.unregisterOnSharedPreferenceChangeListener(playbackListener);alive=false;loginGeneration++;worker.shutdownNow();feedWorker.shutdownNow();detailWorker.shutdownNow();lyricWorker.shutdownNow();ui.removeCallbacksAndMessages(null)}
 }

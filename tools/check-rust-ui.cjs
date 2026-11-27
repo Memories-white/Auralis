@@ -18,7 +18,7 @@ const data = {
   search: [], playlists, recommendations: playlists, queue: rows.slice(0, 8), history: ['周末', '慢慢听'], artists: ['Auralis Studio', '音乐时光'],
   detailTitle: '晚风里的旋律', detailCover: playlists[1].cover, detailLoading: false, detailError: '', query: '', searchedQuery: '', busy: false, status: '',
   discoveryLoading: false, discoveryMore: true, discoveryError: '', colorMode: 'light', monet: false, monetSource: 'wallpaper', monetStyle: 'TonalSpot', monetSpec: 'Spec2021', monetColor: '3482FF',
-  quality: 'auto', qualityFallback: true, version: '0.5.6-preview', qrOpen: false, lyrics: '[00:00.00]让旋律慢慢靠近\n[00:03.00]把今天交给音乐\n[00:06.00]下一句，落在心里\n[00:09.00]和你一起慢慢听\n[00:12.00]每一刻都有回响\n[00:15.00]走向更远的地方',
+  quality: 'auto', qualityFallback: true, version: '0.5.7-preview', qrOpen: false, lyrics: '[00:00.00]让旋律慢慢靠近\n[00:03.00]把今天交给音乐\n[00:06.00]下一句，落在心里\n[00:09.00]和你一起慢慢听\n[00:12.00]每一刻都有回响\n[00:15.00]走向更远的地方',
   translation: '', currentSong: rows[1], collectionBusy: false, collectionMessage: '', safeTop: 24, safeBottom: 16,
   colors: { bg: '#f6f6f6', card: '#ffffff', fg: '#191919', muted: '#797b80', primary: '#3482ff', 'on-primary': '#ffffff', border: '#e7e8eb' },
 };
@@ -92,7 +92,11 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     await page.waitForFunction(() => [...document.querySelectorAll('#content img[data-art-src]')].every(img => img.complete && img.naturalWidth > 0));
     for (const [url, count] of coverRequestsAtBoot) assert.equal(artworkRequests.get(url), count, 'Changing pages refetched cover ' + url);
     assert.ok(await page.locator('#mini-player img').evaluate(img => img.complete && img.naturalWidth > 0));
-    assert.equal(await page.locator('#navigation button').count(), 3);
+    assert.equal(await page.locator('#navigation button').count(), 4);
+    data.page='collection';await content();
+    assert.equal(await page.locator('#navigation [aria-selected=true]').innerText(),'歌曲');
+    assert.equal(await page.locator('[id^="song-likes-"]').count(),24);
+    data.page='home';await content();
     assert.equal(await page.locator('[data-action=daily]').count(), 1);
     assert.equal(await page.locator('[data-action="song:discovery:6"]').count(), 1, 'Shelf songs repeat in discovery rows');
     assert.equal(await page.locator('.feed-status [data-action=load_more]').count(), 1, 'Recommendation paging needs a manual control');
@@ -113,12 +117,12 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     await page.waitForTimeout(600);
     const dockSettled = await page.evaluate(() => {
       const nav = document.querySelector('#navigation');
-      const item = document.querySelectorAll('#navigation .nav-item')[1].getBoundingClientRect();
-      return { index: parseFloat(getComputedStyle(nav).getPropertyValue('--nav-index')), height:nav.getBoundingClientRect().height,icon:document.querySelector('.nav-glyph svg').getBoundingClientRect().width,weight:getComputedStyle(document.querySelectorAll('.nav-item')[1]).fontWeight,selected:document.querySelectorAll('.nav-item')[1].getAttribute('aria-selected') };
+      const item = document.querySelectorAll('#navigation .nav-item')[2].getBoundingClientRect();
+      return { index: parseFloat(getComputedStyle(nav).getPropertyValue('--nav-index')), height:nav.getBoundingClientRect().height,icon:document.querySelector('.nav-glyph svg').getBoundingClientRect().width,weight:getComputedStyle(document.querySelectorAll('.nav-item')[2]).fontWeight,selected:document.querySelectorAll('.nav-item')[2].getAttribute('aria-selected') };
     });
-    assert.ok(dockTrack.some(v => v > 0.02 && v < 0.98), `Dock indicator jumped instead of gliding: ${dockTrack.join(',')}`);
-    assert.ok(dockTrack.every(v => v >= 0 && v < 1.045), 'Dock overshoot exceeded the spring tolerance: '+dockTrack);
-    assert.ok(dockSettled.index > 0.999 && dockSettled.index < 1.001, `Dock indicator did not settle on slot 1: ${dockSettled.index}`);
+    assert.ok(dockTrack.some(v => v > 0.02 && v < 1.98), `Dock indicator jumped instead of gliding: ${dockTrack.join(',')}`);
+    assert.ok(dockTrack.every(v => v >= 0 && v < 2.09), 'Dock overshoot exceeded the spring tolerance: '+dockTrack);
+    assert.ok(dockSettled.index > 1.999 && dockSettled.index < 2.001, `Dock indicator did not settle on slot 2: ${dockSettled.index}`);
     assert.equal(await page.locator('.nav-item').first().evaluate(e=>getComputedStyle(e).backgroundColor),'rgba(0, 0, 0, 0)');assert.equal(dockSettled.height,64);assert.equal(dockSettled.icon,26);assert.equal(dockSettled.weight,'700');assert.equal(dockSettled.selected,'true');assert.equal(await page.locator('.nav-pill').count(),0);
     data.page = 'home'; await content(); await page.waitForTimeout(700);
 
@@ -205,6 +209,8 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
 
     live.playing = true; await pulse(); await page.waitForTimeout(800);
     assert.ok(await page.locator('#mini-player').evaluate(e => e.classList.contains('expanded')));
+    const expandedFits=await page.locator('#mini-player').evaluate(e=>{const box=e.getBoundingClientRect();return [...e.querySelectorAll('.mini-five button')].every(b=>{const r=b.getBoundingClientRect();return r.top>=box.top&&r.bottom<=box.bottom&&r.left>=box.left&&r.right<=box.right;});});
+    assert.ok(expandedFits,'Expanded mini-player clips transport/favorite/queue controls');
     await page.screenshot({ path: path.join(output, 'mini-expanded-light.png') });
     await page.waitForTimeout(4400);
     assert.ok(!(await page.locator('#mini-player').evaluate(e => e.classList.contains('expanded'))));
@@ -232,6 +238,13 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     data.detailTotal = 700; data.detailHasMore = true; data.detailLoadingMore = false; await content();
     assert.ok(await page.locator('#content .song-row').count() === 100, 'Expected the first rendered page');
     assert.ok((await page.locator('#content').innerText()).includes('700 首'), 'Header did not show the real song count');
+    assert.equal(await page.locator('.playlist-hero h2').count(),1);
+    assert.equal(await page.locator('#header .large-title').evaluate(e=>getComputedStyle(e).display),'none');
+    await page.locator('[data-action=detail-artists]').click();
+    assert.ok(await page.locator('.artist-row').count()>0,'Playlist artist tab is empty');
+    await page.locator('.artist-row').first().click();
+    assert.ok(await page.evaluate(()=>window.__actions.some(a=>a.type==='search'&&a.query)));
+    await page.locator('[data-action=detail-songs]').click();
     assert.ok((await page.locator('.local-more .more-note').innerText()).includes('已加载 100 / 700 首'));
     await page.waitForTimeout(450);
     await page.screenshot({ path: path.join(output, 'playlist-long.png') });
@@ -268,6 +281,7 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     await page.locator('[data-action="navigate:about"]').click();const settingsScroll=await page.locator('#content').evaluate(e=>e.scrollTop);
     data.page='about';await content();await page.waitForTimeout(450);
     assert.equal(await page.locator('.about-identity').count(),1);
+    assert.equal(await page.locator('.about-logo').evaluate(e=>e.getBoundingClientRect().width),112);
     await page.screenshot({path:path.join(output,'about-dark.png')});
     await page.locator('[data-action="link:project"]').click();
     assert.equal(await page.evaluate(()=>window.__actions.filter(a=>a.type==='open_external').at(-1).url),'https://github.com/Memories-white/Auralis');
@@ -414,10 +428,19 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
       {time:5000,end:10000,text:'Let every word shine',words:[{text:'Let ',start:5000,end:6000},{text:'every ',start:6000,end:7000},{text:'word ',start:7000,end:8000},{text:'shine',start:8000,end:9500}]}
     ]);
     data.uiPreferences = {lyricAlign:'center',lyricSize:'28',lyricBlur:'on'};
+    const restoredLyrics=data.lyrics,restoredWords=data.wordLyrics;
+    data.lyrics='';data.wordLyrics='[]';data.lyricState='loading';live.playing=false;
+    await content();await pulse();await page.locator('[data-action=player_lyrics]').click();
+    assert.ok((await page.locator('.lyric-empty').innerText()).includes('正在加载歌词'));
+    data.lyricState='error';await content();
+    await page.locator('[data-action=retry_lyrics]').click();
+    assert.ok(await page.evaluate(()=>window.__actions.some(a=>a.type==='retry_lyrics')));
+    data.lyrics=restoredLyrics;data.wordLyrics=restoredWords;data.lyricState='ready';
     live.position=1500;live.playing=false;await content();await pulse();
-    await page.locator('[data-action=player_lyrics]').click();await page.waitForTimeout(800);
+    await page.waitForTimeout(800);
     const fills = () => page.locator('#lyric-0 .karaoke-word').evaluateAll(ws => ws.map(w => parseFloat(w.style.getPropertyValue('--word-fill'))));
     let wordFills=await fills();
+    assert.equal(await page.locator('.lyric-empty').count(),0,'Paused restored lyrics require pressing play');
     assert.ok(wordFills[0]>=100 && Math.abs(wordFills[1]-50)<1 && wordFills[2]<0, 'Completed/current/future words are not independently lit');
     const spatial=await page.evaluate(()=>[...document.querySelectorAll('#word-0-1 .karaoke-glyph')].map(e=>new DOMMatrix(getComputedStyle(e).transform)) .map(m=>({y:m.m42,scale:m.a})));
     assert.ok(spatial[0].y<-.5&&spatial.at(-1).y===0,'Reveal did not lift the sung letters independently');
