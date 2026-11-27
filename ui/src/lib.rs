@@ -39,6 +39,7 @@ struct SheetLayers {
     overlay: Option<Element>,
     width: f64,
     height: f64,
+    content_rows: Vec<(Element, f64)>,
 }
 
 #[derive(Clone)]
@@ -1518,6 +1519,20 @@ impl App {
                 overlay: el("shared-artwork"),
                 width,
                 height,
+                content_rows: [
+                    ".player-toolbar",
+                    ".player-identity",
+                    ".player-pages",
+                    ".page-dots",
+                    ".player-footer",
+                ]
+                .iter()
+                .filter_map(|selector| {
+                    let row = find(&format!("#player .player-safe > {selector}"))?;
+                    let y = row.dyn_ref::<HtmlElement>()?.offset_top() as f64;
+                    Some((row, y))
+                })
+                .collect(),
             })
         })();
     }
@@ -1842,6 +1857,11 @@ impl App {
             }
             self.paint_mini_pose();
         }
+        if let Some(layers) = self.sheet_layers.as_ref() {
+            for (row, _) in &layers.content_rows {
+                style(row, "transform", "none");
+            }
+        }
         self.morph = if self.reduced {
             None
         } else {
@@ -1951,6 +1971,15 @@ impl App {
         );
         style(&layers.surface, "opacity", &blend.background.to_string());
         style(&layers.content, "opacity", &blend.content.to_string());
+        // Move each section with the expanding container's vertical geometry,
+        // while preserving text/control proportions. No delayed control reveal.
+        for (row, top) in &layers.content_rows {
+            style(
+                row,
+                "transform",
+                &format!("translate3d(0,{:.3}px,0)", top * (sy / sx.max(0.001) - 1.0)),
+            );
+        }
         style(
             &layers.content,
             "transform",
