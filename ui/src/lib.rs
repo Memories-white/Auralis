@@ -1842,9 +1842,11 @@ impl App {
             }
             self.paint_mini_pose();
         }
-        // The full page enters as one sheet, including its original artwork.
-        // Avoid a second moving copy of the mini-player cover.
-        self.morph = None;
+        self.morph = if self.reduced {
+            None
+        } else {
+            self.measure_morph()
+        };
         self.cache_sheet_layers();
         if self.reduced {
             let target = if open { 1.0 } else { 0.0 };
@@ -1927,23 +1929,37 @@ impl App {
         let p = p.clamp(0.0, 1.0);
         let q = 1.0 - p;
         let blend = motion::sheet_blend(p);
-        let offset = layers.height * q;
+        let [x, y, mw, mh] = self.sheet_bounds;
+        let sx = (mw + (layers.width - mw) * p) / layers.width.max(1.0);
+        let sy = (mh + (layers.height - mh) * p) / layers.height.max(1.0);
         style(
             &layers.surface,
             "transform",
-            &format!("translate3d(0,{offset:.3}px,0)"),
+            &format!(
+                "translate3d({:.3}px,{:.3}px,0) scale({:.6},{:.6})",
+                x * q,
+                y * q,
+                sx,
+                sy
+            ),
         );
+        let r = self.sheet_radius * q;
         style(
             &layers.surface,
             "border-radius",
-            &format!("{:.3}px", 24.0 * q),
+            &format!("{}px / {}px", r / sx.max(0.001), r / sy.max(0.001)),
         );
         style(&layers.surface, "opacity", &blend.background.to_string());
         style(&layers.content, "opacity", &blend.content.to_string());
         style(
             &layers.content,
             "transform",
-            &format!("translate3d(0,{offset:.3}px,0)"),
+            &format!(
+                "translate3d({:.3}px,{:.3}px,0) scale({:.6})",
+                x * q,
+                y * q,
+                sx
+            ),
         );
         style(&layers.mini, "opacity", &blend.mini.to_string());
         style(&layers.nav, "opacity", &blend.mini.to_string());
@@ -1999,15 +2015,25 @@ impl App {
             self.unmount_morph();
             return;
         }
-        let geometry = motion::smooth(p);
-        let lift = p * 0.62 + geometry * 0.38;
-        let left = motion::lerp(morph.from[0], morph.to[0], geometry);
-        let top = motion::lerp(morph.from[1], morph.to[1], lift);
-        let side = motion::lerp(morph.from[2], morph.to[2], geometry);
+        let horizontal = 1.0 - (1.0 - p).powi(3);
+        let vertical = p.powi(3) * 0.6 + p * 0.4;
+        let side = motion::lerp(morph.from[2], morph.to[2], p);
+        let center_x = motion::lerp(
+            morph.from[0] + morph.from[2] / 2.0,
+            morph.to[0] + morph.to[2] / 2.0,
+            horizontal,
+        );
+        let center_y = motion::lerp(
+            morph.from[1] + morph.from[3] / 2.0,
+            morph.to[1] + morph.to[3] / 2.0,
+            vertical,
+        );
+        let left = center_x - side / 2.0;
+        let top = center_y - side / 2.0;
         let scale = (side / morph.to[2].max(1.0)).max(0.02);
         // The overlay is scaled from a fixed box, so the CSS radius is divided by the
         // scale to keep the *rendered* radius exactly on the interpolated value.
-        let radius = motion::lerp(morph.radius_from, morph.radius_to, geometry) / scale;
+        let radius = motion::lerp(morph.radius_from, morph.radius_to, p) / scale;
         if let Some(overlay) = layers.overlay {
             style(
                 &overlay,

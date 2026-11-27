@@ -60,9 +60,9 @@ pub struct SheetBlend {
 pub fn sheet_blend(progress: f64) -> SheetBlend {
     let p = progress.clamp(0.0, 1.0);
     SheetBlend {
-        background: smooth(p / 0.2),
-        mini: 1.0 - smooth(p / 0.3),
-        content: ease_out((p - 0.1) / 0.5),
+        background: (p / 0.2).clamp(0.0, 1.0).powi(3),
+        mini: (1.0 - (p / 0.3).clamp(0.0, 1.0)).powi(3),
+        content: ((p - 0.1) / 0.5).clamp(0.0, 1.0).powi(3),
         mini_above: p > 0.0 && p < 0.3,
     }
 }
@@ -178,7 +178,7 @@ mod tests {
         assert_eq!((end.background, end.mini, end.content), (0.0, 1.0, 0.0));
         let tail = sheet_blend(0.1);
         assert!(
-            tail.mini > 0.7 && tail.background <= 0.5 && tail.content == 0.0 && tail.mini_above
+            tail.mini > 0.25 && tail.background <= 0.5 && tail.content == 0.0 && tail.mini_above
         );
         let full = sheet_blend(1.0);
         assert_eq!((full.background, full.mini, full.content), (1.0, 0.0, 1.0));
@@ -191,7 +191,7 @@ mod tests {
                 let p = s.sample(1.0 / hz as f64, Feel::SHEET);
                 let b = sheet_blend(p);
                 if p < 0.12 && p > 0.02 {
-                    assert!(b.mini > 0.6 && b.background < 0.7);
+                    assert!(b.mini > 0.2 && b.background < 0.7);
                     visible += 1;
                 }
             }

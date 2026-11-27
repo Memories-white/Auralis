@@ -2,7 +2,25 @@
 
 > 每次改动后更新此表；入口约定已写入根目录 `AGENTS.md`。布局、交互、设置校验和动画以 Rust 为主，Android 只做必要的平台桥接。
 
-## 当前交付 · 0.5.13
+## 当前交付 · 0.5.14
+
+| 项目 | 状态 / 入口 |
+| :-- | :-- |
+| 日期、版本 | 2026-11-27 · 0.5.14-preview · versionCode 41 |
+| 源码基线 | 2b2b28fc2cc0c2c7d5dd434815cfd762dc2b9d86 |
+| APK | APKs/Auralis-v0.5.14-preview.apk · 16241859字节 |
+| SHA256 | 1FBA232DA97BCE49FB0699EF9384738CA405D291F822F1606091DA454E98649F |
+| 安装 / 发布 | 已保留数据安装；手机回读包哈希一致；源码推送main，未创建Release |
+
+| 请求 | 实现与证据 | 限制 |
+| :-- | :-- | :-- |
+| 对照Melox展开 | 用户反馈0.5.13不一致。重录Melox并读取上游 PlayerSheetGeometry、PlayerSheetRenderer 与 PlayerSheetTransition，确认共享容器插值、独立封面中心轨迹、曲线交接及弹簧，而非整页简单上滑。参考 https://github.com/Inefy-03/Melox/tree/ecd04c5e8d77993071263a38b4cee5b5ddcec8ba ，上游 GPL-3.0 | 采用Rust独立实现并注明参考；屏幕布局、封面内容与原应用不同，未声称逐像素一致 |
+| 动画实现 | ui/src/lib.rs::begin_sheet/apply_sheet 恢复共享封面与实际端点测量；容器线性变化，封面横向ease-out、纵向线性与立方混合、尺寸线性；motion.rs按参考调整淡入时机，style.css将内容缩放原点置左上 | 手势反向保留弹簧速度；内容非原生Compose图层，设备和帧率差异可能影响观感 |
+| 验证 | UI32/core44/Java4组、完整构建；check-rust-ui、handoff、rapid回归通过；手机8轮快速开关及节点复用、3次warm reopen通过，保留数据安装与回读哈希 | 手机各自录屏保存在device-debug，未公开。无GPU帧率测量，不宣称逐帧一致或全部场景无闪烁；两处旧曲线辅助函数编译告警 |
+
+---
+
+## 0.5.13 历史交付
 
 | 项目 | 状态 / 入口 |
 | :-- | :-- |
