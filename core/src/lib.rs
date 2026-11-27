@@ -13,6 +13,7 @@ use std::{
 
 const GATEWAY: &str = "https://u.y.qq.com/cgi-bin/musicu.fcg";
 mod discovery;
+mod playback_controls;
 mod artwork;
 mod qrc;
 mod playlist;
@@ -746,6 +747,8 @@ pub fn dispatch(command: &str, input: &str) -> String {
     let result = (|| -> Result<Value, String> {
         let v: Value = serde_json::from_str(input).map_err(|e| format!("请求 JSON 错误: {e}"))?;
         match command {
+            "audio_plan"=>playback_controls::audio(&v),
+            "enqueue"=>playback_controls::enqueue(&v),
             "artwork_candidates"=>Ok(artwork::candidates(&v)),
             "artwork_catalog"=>Ok(artwork::catalog(&v)),
             "profile" => profile(&v["session"]),

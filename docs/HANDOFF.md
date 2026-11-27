@@ -6,17 +6,40 @@
 
 | 项目 | 状态 / 入口 |
 | :-- | :-- |
-| 日期、版本 | 2026-11-27 · `0.5.4-preview` · versionCode `31` |
-| 基线 | `28e7f5d04cf593215a6cc54d8209177f12452bc9` · 已推送的0.5.3逐词歌词版；本轮开始本地与远程main一致 |
+| 日期、版本 | 2026-11-27 · `0.5.5-preview` · versionCode `32` |
+| 基线 | `05e759dccbd5284906e69b4c3568951bc8225c3b` · 已推送的0.5.4底栏/独立转场版 |
 | 当前提交 | 本文与本次实现同一个提交；使用 `git log -1` 获取完整 SHA，避免文档自引用哈希 |
-| 最新本地包 | `APKs/Auralis-v0.5.4-preview.apk` |
-| APK SHA256 | `67DECF2881D9DB5248D938D95348332353BD8127E5CD1EB8CD30B3B36F8F79F4` |
-| 包体 | 16118271 字节；`apksigner verify` v2通过（debug 证书） |
+| 最新本地包 | `APKs/Auralis-v0.5.5-preview.apk` |
+| APK SHA256 | `9D80E2A39CE2D57F89C6BEB397AC30132C42FBAC8253AFAAB41DEC9406E5BC1E` |
+| 包体 | 16359062 字节；`apksigner verify` v2通过；debug签名证书与0.5.4一致 |
 | 仓库 | [Memories-white/Auralis](https://github.com/Memories-white/Auralis) · public |
 | 已发布版本 | GitHub Release 与主分支分开管理；本次不自动创建 Release |
 | 当前界面架构 | Rust/WASM + Android WebView；不要恢复 Kotlin 页面或增加 JS 动画控制器 |
 
 ## 本次改动交接表
+
+| 问题 / 需求 | 实现与入口 | 验证 / 边界 / 下一步 |
+| :-- | :-- | :-- |
+| 图3的进度条与底部控件 | `ui/src/render.rs::player` / `style.css`：封面和歌词使用同一seek组件，6px中性圆角实心轨道、无边框、无闲置滑块；时间位于下方；进度→上一首/播放/下一首→顺序/定时/音效/队列/更多。歌词上方增加字号与译文入口 | WASM检查轨道6px/边框0、实际元素纵向顺序；封面、歌词共用seek输入与原媒体跳转桥接；参考图按dp和可用高度适配，并非跨字体/分辨率像素截图保证 |
+| 只还原逐字亮度，没有空间动效 | `karaoke.rs::pieces/effect`、`render.rs::lyrics`、`lib.rs::sync_lyrics/cache_lyric_nodes`：Rust依据真实词区间的扫亮分数，驱动字形上浮；长音缩放与柔光，再回到正常比例；已唱字在本句保持抬起，离开焦点复位；原整句上浮和远近模糊保留 | 暂停冻结、倒退seek、跨句、原生采样间逐帧推进、无逐字数据回退均通过；字形矩阵测得已唱字上浮、未唱字静止、长音scale>1.02。仅有词时钟，不伪称云端提供逐字符时间；复杂组合/连写文字保留整词排版 |
+| 动效开销与用户排版 | 新增glyph_fills缓存，只有揭示分数变化的字形写样式；仅活动行算效果；首次进入歌词才创建节点；减少动态时不位移/缩放/柔光。默认居中24px/500字重，已有自定义设置仍保留 | Rust UI28项通过，包含空间位移/长音/端点/减少动态/组合文字；没有据此声称手机实际GPU帧率达标。长逐字歌词的初次建字节点成本仍需真机采样 |
+| 图1音频面板 | `render.rs::overlay(audio-effects)`：倍速滑轨、系统均衡器、可用时MiSound、播放暂停淡入淡出；白色滑块，分组半透明卡片；`RustWebView.kt`桥接和能力查询；Manifest只增加目标intent/package可见性 | 浏览器验证1.25倍事件、开关事件、明暗与360px；均衡器无可用组件时隐藏，未播放时提示先播放；MiSound检测com.miui.misound.HeadsetSettingsActivity的enabled/exported属性，可用时显示。真实系统面板及听感未实测 |
+| 倍速与淡入淡出真实接入 | `core/src/playback_controls.rs::audio`：校验0.25–2.0倍/0.05步进，Rust生成320ms音量曲线；`PlayerService.kt`用PlaybackParams及Handler执行曲线，持久化参数。Snapshot/MediaSession/逐词插值使用实际速度；新播放/反向操作/停止取消旧音量任务 | 核心测试验证边界、曲线端点/单调与时长；Android编译通过。参数不支持时保留旧速度或回退原速并显示原因；暂停淡出过程中关闭开关会结束实际播放，避免静音继续跑；实机听感待验证 |
+| 图2歌曲操作菜单 | `render.rs::overlay(song-actions)`：封面/歌名/作者/专辑头部，下一首、加入队列、云端喜欢、加入歌单、专辑/艺术家、音质、音效、分享、歌曲信息；78%高度，内部可滚动。跨子页保留同一个sheet根节点 | 不包含本地元数据编辑、隐藏和删除文件；专辑/艺术家目前打开歌曲信息页，不宣称新增在线专辑/艺人目录。WASM验证稳定弹层、加入歌单原流程和下一首/队尾不同事件 |
+| 队列与系统分享 | `core::playback_controls::enqueue`决定插入位置，保留当前索引；`RustWebView.kt`取得当前歌曲和最新队列，`PlayerService.QUEUE_EDIT`再次检查当前歌曲并保存恢复快照；分享仅在用户点按钮时打开系统选择器 | Rust覆盖下一首/尾部/非法索引；操作菜单可显示结果。未在手机真实播放中验证重复歌曲、连续改队列及系统分享目标；切歌并发冲突下需重试 |
+| 构建和交付 | code32 / 0.5.5；本地包、源码推送与Release分开 | 完整WASM/NDK/Gradle离线构建及APK签名通过；普通沙箱Gradle缓存缺插件，用已有本机缓存构建成功，无依赖升级；源码推送main，不创建Release |
+
+## 0.5.5 验证表
+
+| 检查 | 结果 / 证据 |
+| :-- | :-- |
+| 单元/策略 | Rust UI28、core42、Java4组通过；音频曲线和队列插入策略位于Rust，原QRC/登录/歌单/Provider链路未替换 |
+| 实际WASM | `tools/check-rust-ui.cjs` 通过，新增逐字空间矩阵、进度条几何/顺序、音效参数与状态回传、明暗音效截图和360px溢出；原二维码、700首分页、共享封面反向、触屏切页、封面缓存和稳定弹层回归通过 |
+| 视觉/令牌 | 本地忽略目录 `device-debug/rust-ui/browser/karaoke-spatial.png`、`audio-effects-{light,dark}.png`、`song-actions-dark.png` 已复核；为自写歌词和图片夹具。设计令牌lint 0 error / 0 warn |
+| 包与签名 | APK哈希/字节见当前交付；v2签名通过，证书SHA256 `a1dab650d1c39a63e21255150995b50e2cac236337e794c33a96e7db292cbfde` 与0.5.4相同 |
+| 实机/下一步 | 用户要求后续连接USB再通知，本轮没有安装、真实播放或听感验证。之后保留数据安装，检查真实长音逐字上浮、快进/暂停/倍速同步、淡出反向、音效能力入口、队列插入和实际呈现帧率 |
+
+## 0.5.4 历史改动交接表
 
 | 问题 / 需求 | 实现与入口 | 验证 / 边界 / 下一步 |
 | :-- | :-- | :-- |

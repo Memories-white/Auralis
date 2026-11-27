@@ -1,3 +1,13 @@
+# v0.5.5-preview 播放器控制与逐字空间动效（2026-11-27）
+
+- 完整Rust/WASM、NDK和Android构建通过，code32。APK v2签名通过，与0.5.4证书一致；哈希和交接表在docs/HANDOFF.md。本次源码推送main，不创建Release。
+- Rust UI28、核心42、Java4组通过。新增覆盖字形上浮/长音缩放/减少动态/组合字符、倍速边界、320ms音量曲线和队列插入位置；不将策略单测称为真实听感测试。
+- 真实WASM验证6px无描边轨道、进度/控制/工具栏顺序、逐字空间矩阵、暂停/seek/跨句及原生脉冲间进度；音效1.25倍与开关事件/状态回传、分组菜单稳定根节点、明暗与360px无溢出通过。原封面复用/触屏/二维码/700首分页回归通过。
+- 截图复核：`device-debug/rust-ui/browser/karaoke-spatial.png`、`audio-effects-light.png`、`audio-effects-dark.png`、`song-actions-dark.png`；全部为本地夹具，未上传账号或真实歌词。样式令牌lint 0 error / 0 warn。
+- 未连接/安装手机，系统均衡器、MiSound、分享选择器、真实音频倍速/淡入淡出/队列操作和GPU呈现帧率尚未实测；不以浏览器通过替代。用户通知USB连接后，保留数据验证这些路径。
+
+---
+
 # v0.5.4-preview 底栏与展开转场（2026-11-27）
 
 - 完整WASM/NDK/Gradle离线构建成功，code31；APK v2签名通过。Rust UI27、core40、Java4组通过，样式令牌0错误0警告。

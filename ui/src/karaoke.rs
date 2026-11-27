@@ -58,9 +58,61 @@ pub fn fill(word: &Word, position: i32) -> i32 {
         ((position - word.start) as i64 * 1000 / (word.end - word.start).max(1) as i64) as i32
     }
 }
+/// Presentation follows the real word interval. These are reveal fractions, not
+/// invented character timestamps. Joined/nontrivial scripts remain shaped together.
+pub fn pieces(text: &str) -> Vec<String> {
+    if text
+        .chars()
+        .all(|c| c.is_ascii() || ('\u{3400}'..='\u{9fff}').contains(&c))
+    {
+        text.chars().map(|c| c.to_string()).collect()
+    } else {
+        vec![text.to_owned()]
+    }
+}
+#[derive(Debug, Clone, Copy)]
+pub struct Effect {
+    pub lift: f64,
+    pub scale: f64,
+    pub glow: f64,
+}
+pub fn effect(progress: f64, piece: usize, count: usize, duration: i32, reduced: bool) -> Effect {
+    if reduced {
+        return Effect {
+            lift: 0.0,
+            scale: 1.0,
+            glow: 0.0,
+        };
+    }
+    let p = (progress * count.max(1) as f64 - piece as f64).clamp(0.0, 1.0);
+    let reveal = p * p * (3.0 - 2.0 * p);
+    let pulse = (std::f64::consts::PI * p).sin().max(0.0).powi(2);
+    // Long sustained words get a soft swell; short syllables only rise with reveal.
+    let sustained = ((duration as f64 - 650.0) / 700.0).clamp(0.0, 1.0);
+    Effect {
+        lift: -0.065 * reveal,
+        scale: 1.0 + 0.11 * pulse * sustained,
+        glow: 0.48 * pulse * sustained,
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reveal_has_spatial_lift_swell_and_stable_endpoints() {
+        let a = effect(0.25, 0, 2, 1800, false);
+        let b = effect(0.25, 1, 2, 1800, false);
+        assert!(a.lift < 0.0 && a.scale > 1.09 && a.glow > 0.4);
+        assert_eq!(b.lift, 0.0);
+        assert_eq!(b.scale, 1.0);
+        let end = effect(1.0, 0, 2, 1800, false);
+        assert_eq!(end.lift, -0.065);
+        assert!((end.scale - 1.0).abs() < 1e-9);
+        assert_eq!(effect(0.25, 0, 2, 1800, true).lift, 0.0);
+        assert_eq!(pieces("你好!").len(), 3);
+        assert_eq!(pieces("سلام").len(), 1);
+        assert_eq!(pieces("e\u{301}").len(), 1);
+    }
     #[test]
     fn progress_pauses_seeks_and_respects_real_gaps() {
         let w = Word {

@@ -1,4 +1,12 @@
 <resources>
+    <string name="audio_effects">音频效果</string>
+    <string name="playback_speed">播放速度</string>
+    <string name="system_equalizer">系统均衡器</string>
+    <string name="playback_pause_fade">播放暂停时淡入淡出</string>
+    <string name="play_next">下一首播放</string>
+    <string name="add_to_queue">添加到队列</string>
+    <string name="share_song">分享</string>
+    <string name="translation">译文</string>
     <string name="music_library">音乐库</string>
     <string name="filter_all">全部</string>
     <string name="filter_created">我创建的</string>

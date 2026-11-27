@@ -377,7 +377,10 @@ pub fn lyrics(
     } else {
         lines.iter().enumerate().map(|(index,(time,line))|{
         let translated=translations.iter().find(|(at,_)|(*time-*at).abs()<=500).map(|(_,t)|format!("<small>{}</small>",esc(t))).unwrap_or_default();
-        let words=word_lines.get(index).filter(|words|!words.is_empty()).map(|words|words.iter().enumerate().map(|(j,word)|format!("<span id=word-{index}-{j} class=karaoke-word>{}</span>",esc(&word.text))).collect::<String>());
+        let words=word_lines.get(index).filter(|words|!words.is_empty()).map(|words|words.iter().enumerate().map(|(j,word)|{
+            let glyphs=crate::karaoke::pieces(&word.text).iter().enumerate().map(|(k,g)|format!("<span id=glyph-{index}-{j}-{k} class=karaoke-glyph>{}</span>",esc(g))).collect::<String>();
+            format!("<span id=word-{index}-{j} class=karaoke-word>{glyphs}</span>")
+        }).collect::<String>());
         format!("<div id=lyric-{index} class=lyric-line data-action=\"lyric-seek:{time}\"><strong>{}</strong>{translated}</div>",words.unwrap_or_else(||esc(line)))
     }).collect::<String>()
     }
@@ -424,13 +427,29 @@ pub fn player(
             art(s(live, "cover"), false, "identity-art")
         )
     };
-    format!("<div id=player-surface class=player-surface><div class=player-wash>{}</div></div><div class=player-safe><div class=player-toolbar>{}<span>{}</span>{}</div><div class=player-identity>{identity_art}<div><h2>{}</h2><p>{}</p></div></div><div id=player-pages class=player-pages><div class=player-strip><div class=information-pane>{information}</div><div class=cover-pane><button id=cover-art class=cover-art data-action=song-actions aria-label=\"{}\">{}</button></div><div id=lyric-viewport class=lyric-viewport><div id=lyric-lines class=lyric-lines>{lyric_lines}</div></div></div></div><div class=page-dots>{}</div><div class=player-footer><div class=cover-seek>{}{}</div><div class=playback-error role=status>{}</div>{}<div class=player-tools>{}{}{}{}{}</div><div class=lyric-progress>{}</div></div></div>",
+    let lyric_options = format!(
+        "<div class=lyric-options>{}{}</div>",
+        action("lyrics-appearance", &label("lyrics_style"), "text", ""),
+        action(
+            if crate::customization::get(data, "translation") == "on" {
+                "ui:translation:off"
+            } else {
+                "ui:translation:on"
+            },
+            &label("translation"),
+            "translation",
+            ""
+        )
+    );
+    format!("<div id=player-surface class=player-surface><div class=player-wash>{}</div></div><div class=player-safe><div class=player-toolbar>{}<span>{}</span>{}</div><div class=player-identity>{identity_art}<div><h2>{}</h2><p>{}</p></div></div><div id=player-pages class=player-pages><div class=player-strip><div class=information-pane>{information}</div><div class=cover-pane><button id=cover-art class=cover-art data-action=song-actions aria-label=\"{}\">{}</button></div><div id=lyric-viewport class=lyric-viewport><div id=lyric-lines class=lyric-lines>{lyric_lines}</div></div></div></div><div class=page-dots>{}</div><div class=player-footer>{lyric_options}<div class=cover-seek>{}{}</div><div class=playback-error role=status>{}</div>{}<div class=player-tools>{}{}{}{}{}</div><div class=lyric-progress>{}</div></div></div>",
         art(s(live,"cover"),false,"player-cover"),action("close_player",&label("collapse_player"),"down",""),label("now_playing"),action("song-actions",&label("song_actions"),"more",""),
         escaped_or(s(live,"title"),"not_playing"),esc(s(live,"artist")),label("song_actions"),art(s(live,"cover"),false,"player-cover"),
         ["player_info","player_cover","player_lyrics"].iter().enumerate().map(|(i,a)|format!("<button id=page-dot-{i} data-action={a} aria-label=\"{}\"></button>",label(["song_information","cover_page","lyrics_page"][i]))).collect::<String>(),
         seek(),times(),esc(s(live,"playbackStatus")),transport(live,false),
-        action("mode",&label("playback_mode"),mode,if mode=="order"{""}else{"active"}),format!("<button class=quality-badge data-action=quality>{}</button>",esc(quality_badge(live))),
-        action("sleep",&label("sleep_timer"),"timer",if n(live,"sleepRemaining")>0||b(live,"sleepAfterTrack"){"active"}else{""}),action("queue",&label("play_queue"),"queue",""),action("favorite",&label("local_favorites"),"heart",if b(live,"favorite"){"active"}else{""}),seek()).replace("loading=\"lazy\"","loading=\"eager\"")
+        action("mode",&label("playback_mode"),mode,if mode=="order"{""}else{"active"}),
+        action("sleep",&label("sleep_timer"),"timer",if n(live,"sleepRemaining")>0||b(live,"sleepAfterTrack"){"active"}else{""}),
+        action("audio-effects",&label("audio_effects"),"equalizer",""),action("queue",&label("play_queue"),"queue",""),action("song-actions",&label("song_actions"),"more-vertical",""),
+        format!("{}{}",seek(),times())).replace("loading=\"lazy\"","loading=\"eager\"")
 }
 fn quality_badge(live: &Value) -> &str {
     match s(live, "actualQuality") {
@@ -488,6 +507,8 @@ pub fn overlay(sheet: &str, data: &Value, live: &Value, can_back: bool) -> Optio
         match sheet {
             "queue" => "play_queue",
             "quality" => "audio_quality",
+            "audio-effects" => "audio_effects",
+            "lyrics-appearance" => "lyrics_style",
             "sleep" => "sleep_timer",
             "add-playlist" => "add_to_playlist",
             "logout" => "logout_title",
@@ -525,6 +546,36 @@ pub fn overlay(sheet: &str, data: &Value, live: &Value, can_back: bool) -> Optio
                 })
                 .collect(),
             "quality" => quality_choices(data, live),
+            "lyrics-appearance" => ["lyricSize", "lyricAlign", "lyricWeight"]
+                .iter()
+                .map(|key| {
+                    crate::customization::radios(data, key)
+                        .iter()
+                        .map(|v| node(v, data, live, true))
+                        .collect::<String>()
+                })
+                .collect(),
+            "audio-effects" => {
+                let speed = live["speed"].as_f64().unwrap_or(1.0);
+                let mut html=format!("<div class=effect-group><div class=effect-caption><button data-action=speed-reset>{}</button><span id=speed-value>×{speed:.2}</span></div><div class=effect-slider style=\"--speed-progress:{}%\"><input id=playback-speed type=range min=0.25 max=2 step=0.05 value={speed} aria-label=\"{}\" /></div></div><div class=effect-group>",label("playback_speed"),(speed-0.25)/1.75*100.0,label("playback_speed"));
+                for (supported, title, action, icon_name) in [
+                    (
+                        b(data, "equalizerSupported"),
+                        "system_equalizer",
+                        "system-equalizer",
+                        "equalizer",
+                    ),
+                    (b(data, "miSoundSupported"), "MiSound", "misound", "volume"),
+                ] {
+                    if supported {
+                        html.push_str(&format!("<button class=action-row data-action={action}>{}<span>{}</span>{}</button>",icon(icon_name),if title=="MiSound"{title.into()}else{label(title)},icon("chevron")));
+                    }
+                }
+                html.push_str("</div><div class=effect-group>");
+                html.push_str(&node(&json!({"kind":"switch","text":{"resource":"playback_pause_fade"},"checked":b(live,"pauseFade"),"enabled":true,"action":"toggle-pause-fade"}),data,live,true));
+                html.push_str("</div>");
+                html
+            }
             "sleep" => {
                 let mut list = format!("<p class=sheet-note>{}</p>", label("sleep_lifecycle"));
                 for minutes in [0, 15, 30, 60, 90, -1] {
@@ -533,19 +584,21 @@ pub fn overlay(sheet: &str, data: &Value, live: &Value, can_back: bool) -> Optio
                 list
             }
             "song-actions" => {
-                let mut html=format!("<div class=action-identity>{}<span><strong>{}</strong><small>{}</small></span></div>",art(s(live,"cover"),false,""),esc(s(live,"title")),esc(s(live,"artist")));
-                for (key, summary, action) in [
-                    ("audio_quality", quality_badge(live).to_owned(), "quality"),
-                    ("add_to_likes", label("cloud_likes_summary"), "add:201"),
-                    (
-                        "add_to_playlist",
-                        label("owned_playlist_summary"),
-                        "add-playlist",
-                    ),
-                    ("sleep_timer", label("sleep_off_summary"), "sleep"),
+                let mut html=format!("<div class=action-identity>{}<span><strong>{}</strong><small>{} · {}</small></span></div><div class=action-group>",art(s(live,"cover"),false,""),esc(s(live,"title")),esc(s(live,"artist")),esc(s(&data["currentSong"],"album")));
+                for (key, action, icon_name) in [
+                    ("play_next", "enqueue-next", "plus"),
+                    ("add_to_queue", "enqueue-tail", "add-queue"),
+                    ("add_to_likes", "add:201", "heart"),
+                    ("add_to_playlist", "add-playlist", "library"),
+                    ("audio_quality", "quality", "quality"),
+                    ("audio_effects", "audio-effects", "equalizer"),
+                    ("share_song", "share-song", "share"),
+                    ("song_information", "show-song-info", "info"),
                 ] {
-                    html.push_str(&node(&json!({"kind":"preference","text":{"resource":key},"summary":{"value":summary},"action":action}),data,live,!b(data,"collectionBusy")));
+                    html.push_str(&format!("<button class=action-row data-action={action} {}>{}<span>{}</span>{}</button>",if b(data,"collectionBusy"){"disabled"}else{""},icon(icon_name),label(key),if action=="quality"{format!("<small>{}</small>",quality_badge(live))}else{String::new()}));
+                    if action=="add-playlist" {html.push_str(&format!("<button class=action-row data-action=show-song-info>{}<span>{}：{}</span></button><button class=action-row data-action=show-song-info>{}<span>艺术家：{}</span></button>",icon("cover"),label("song_album"),escaped_or(s(&data["currentSong"],"album"),"information_unavailable"),icon("account"),esc(s(live,"artist"))));}
                 }
+                html.push_str("</div>");
                 html
             }
             "add-playlist" => {
@@ -590,7 +643,11 @@ pub fn overlay(sheet: &str, data: &Value, live: &Value, can_back: bool) -> Optio
     Some(Overlay {
         class: if qr {
             "qr-sheet"
-        } else if can_back || matches!(sheet, "song-actions" | "add-playlist") {
+        } else if sheet == "song-actions" {
+            "song-menu-sheet"
+        } else if sheet == "audio-effects" {
+            "effects-sheet"
+        } else if can_back || sheet == "add-playlist" {
             "half-sheet"
         } else {
             ""

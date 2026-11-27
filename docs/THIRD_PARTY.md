@@ -13,6 +13,8 @@
 
 ## 依赖
 
+0.5.5 结合用户提供的播放器截图，研究同一Melox提交的 `FullPlayerScreen.kt`、`PlaybackSettingsSheets.kt`、`LyricRenderGeometry.kt` 和 `LyricsView.kt` 的可见效果，并参考 `AudioEffectPreferences.kt` 确认MiSound兼容入口。新增控制区、音效面板、队列策略与字形运动由Rust独立实现，未复制这些文件的新代码；原0.4.1中已注明Apache许可的移植范围不变。逐字的字形位移由真实词区间的揭示进度推导，不声称获取了原生逐字符时间，也没有移植原生文字栅格缓存器或液态玻璃渲染器。
+
 0.5.4 进一步研究 Melox 提交 `bfe7c5dc467b84d7a9df8e63c93208a3e6f61672` 的玻璃底栏、悬浮导航、歌曲栏尺寸和共享封面视觉行为，使用 Rust 状态/弹簧与 CSS 合成图层独立实现；未移植这些 GPL 文件源码。WebView 背景模糊不等同于 Melox 原生液态折射，性能测量也不代表其原生实现的帧率。
 
 0.5.3 的云端QRC解码器按 MIT 项目 [jixunmoe-go/qrc](https://github.com/jixunmoe-go/qrc) 固定提交 `866e996416b0cec7bef648400633f6483c4200d5` 移植到Rust，保留[许可](licenses/QRC-LICENSE)与[修改说明](licenses/QRC-NOTICE.md)。限长解压使用flate2及其Rust backend，依赖版本锁定在core/Cargo.lock。逐字UI和进度逻辑独立使用Rust/CSS实现。

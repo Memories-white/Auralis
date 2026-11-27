@@ -14,7 +14,7 @@
 
 最新修复预览：[0.3.9-preview](https://github.com/Memories-white/Auralis/releases/tag/v0.3.9-preview)。修复“猜你喜欢”内容为空，并支持关闭重开后恢复歌曲、队列与进度。验证范围见[设备记录](design/DEVICE_VALIDATION.md)。稳定版本仍为 0.3.6。
 
-主分支包含 **0.5.4-preview 源码**：使用 **Rust/WASM 实现界面布局、交互和歌词动效**，包含真实逐词渐亮歌词、独立图层的共享封面转场、跟手玻璃底栏、分组设置、封面复用及长歌单分页，并合入二维码登录、真实触屏切页与添加歌单修复。Android 保留主题取色、系统宿主与播放服务。构建、交互检查和实机范围见[验证记录](design/DEVICE_VALIDATION.md)；继续开发前请读 [AI 交接表](docs/HANDOFF.md)。当前已发布安装包仍为上面的 0.3.9-preview。
+主分支包含 **0.5.5-preview 源码**：使用 **Rust/WASM 实现界面布局、交互和歌词动效**，包含真实逐词扫亮与上浮、统一播放器控制区、倍速/淡入淡出、分组歌曲菜单、独立图层的共享封面转场、跟手玻璃底栏、封面复用及长歌单分页。Android 保留主题取色、系统宿主与播放服务。构建、交互检查和实机范围见[验证记录](design/DEVICE_VALIDATION.md)；继续开发前请读 [AI 交接表](docs/HANDOFF.md)。当前已发布安装包仍为上面的 0.3.9-preview。
 
 Auralis 是面向 Android 的音频应用学习项目，使用 **Rust** 实现界面及协议适配。界面模块编译为 WebAssembly，随 APK 离线打包，由 Android WebView 承载；Kotlin 负责平台桥接、业务状态与播放服务。原生 MIUIX 主题继续提供明暗与莫奈配色，页面布局由 Rust 独立实现。
 

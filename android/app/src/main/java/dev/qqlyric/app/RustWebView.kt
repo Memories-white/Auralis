@@ -124,6 +124,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
     }
     fun openPlayer(){requestedPlayer=true;if(ready){send("open_player",JSONObject());requestedPlayer=false}}
     fun close(){animationRate(false);closed=true;worker.shutdownNow();removeJavascriptInterface("AuralisNative");stopLoading();destroy()}
+    private fun miSoundIntent()=android.content.Intent().setClassName("com.miui.misound","com.miui.misound.HeadsetSettingsActivity")
     private fun empty()=WebResourceResponse("text/plain","UTF-8",404,"Not Found",mapOf("Cache-Control" to "no-store"),ByteArrayInputStream(ByteArray(0)))
     private fun resource(uri:Uri):WebResourceResponse{
         if(uri.scheme!="https"||uri.host!="auralis.local")return empty()
@@ -168,6 +169,8 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
             val artists=m.discoverySongs.map{it.optString("artist")}.filter{it.isNotBlank()}.distinct().take(8)
             val sources=listOf("discovery","tracks","recent","favorites","likes","search","queue","playlists","recommendations")
             val state=JSONObject().apply{
+                put("equalizerSupported",activity.packageManager.resolveActivity(android.content.Intent(android.media.audiofx.AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL),0)!=null)
+                put("miSoundSupported",miSoundIntent().resolveActivityInfo(activity.packageManager,0)?.let{it.enabled&&it.exported}==true)
                 put("page",m.page);put("loggedIn",m.loggedIn);put("nickname",m.profile.optString("nickname"));put("avatar",m.avatar);put("uin",m.uin)
                 put("homeReady",m.home.length()>0);put("dailyCover",m.home.optJSONArray("daily")?.optJSONObject(0)?.artwork().orEmpty())
                 put("libraryReady",m.library.length()>0)
@@ -198,6 +201,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
         val pulse=JSONObject().apply{
             put("mid",m.mid);put("title",m.title);put("artist",m.artist);put("cover",m.cover)
             put("position",m.position);put("duration",m.duration);put("playing",m.playing);put("mode",m.playbackMode)
+            put("speed",PlayerService.snapshot.speed);put("pauseFade",PlayerService.snapshot.pauseFade)
             put("actualQuality",m.actualQuality);put("qualityPending",m.qualityPending);put("favorite",m.favorite());put("playbackStatus",m.playbackStatus)
             put("sleepRemaining",m.sleepRemainingSeconds);put("sleepAfterTrack",m.sleepAfterTrack);put("sleepMinutes",m.sleepMinutes)
         }
@@ -227,6 +231,24 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
             "load_more_tracks"->m.loadMoreTracks()
             "play_all"->m.playAllTracks(event.optBoolean("shuffle"))
             "transport"->{val action=event.optString("action");if(action in setOf("PAUSE","RESUME","PREVIOUS","NEXT"))m.command(action)}
+            "audio_settings"->m.command("AUDIO_SETTINGS","speed",event.optDouble("speed",1.0).toString(),"fade",event.optBoolean("fade").toString())
+            "system-equalizer"->{
+                val session=PlayerService.snapshot.audioSession
+                if(session>0){val intent=android.content.Intent(android.media.audiofx.AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL).putExtra(android.media.audiofx.AudioEffect.EXTRA_AUDIO_SESSION,session).putExtra(android.media.audiofx.AudioEffect.EXTRA_PACKAGE_NAME,activity.packageName).putExtra(android.media.audiofx.AudioEffect.EXTRA_CONTENT_TYPE,android.media.audiofx.AudioEffect.CONTENT_TYPE_MUSIC)
+                    runCatching{activity.startActivity(intent)}.onFailure{m.collectionMessage="系统音效面板暂不可用"}}
+                else m.collectionMessage="请先播放一首歌曲，再打开系统均衡器"
+            }
+            "misound"->runCatching{activity.startActivity(miSoundIntent())}.onFailure{m.collectionMessage="此设备的MiSound面板暂不可用"}
+            "share-song"->{val song=m.currentSong();if(song!=null){val mid=song.optString("mid");val text=song.optString("title")+" · "+song.optString("artist")+"\nhttps://y.qq.com/n/ryqq/songDetail/"+android.net.Uri.encode(mid);activity.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT,text),"分享歌曲"))}}
+            "enqueue"->{
+                val current=m.currentSong()
+                if(current!=null&&event.optString("mid")==m.mid){
+                    val input=JSONObject().put("queue",JSONArray(m.queue)).put("index",m.currentIndex).put("song",current).put("next",event.optBoolean("next"))
+                    val result=runCatching{JSONObject(RustCore.call("enqueue",input.toString()))}.getOrNull()
+                    if(result?.optBoolean("ok")==true){val value=result.getJSONObject("data");m.command("QUEUE_EDIT","queue",value.getJSONArray("queue").toString(),"index",value.getInt("index"));m.collectionMessage=if(event.optBoolean("next"))"已设为下一首播放" else "已添加到队列"}
+                    else m.collectionMessage="队列已变更，请重试"
+                }
+            }
             "seek"->m.command("SEEK","position",event.optInt("position").coerceIn(0,m.duration.coerceAtLeast(0)))
             "search"->{m.searchText=event.optString("query").take(200);m.search()}
             "login"->m.login();"dismiss_login"->m.dismissLogin();"logout"->m.logout()

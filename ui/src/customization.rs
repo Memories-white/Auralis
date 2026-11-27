@@ -86,7 +86,7 @@ pub const OPTIONS: &[OptionSpec] = &[
         key: "lyricAlign",
         title: "歌词对齐",
         values: &[("left", "左对齐", ""), ("center", "居中", "")],
-        default: "left",
+        default: "center",
     },
     OptionSpec {
         key: "lyricSize",
@@ -97,7 +97,7 @@ pub const OPTIONS: &[OptionSpec] = &[
             ("32", "大", "32 像素"),
             ("36", "特大", "36 像素"),
         ],
-        default: "28",
+        default: "24",
     },
     OptionSpec {
         key: "lyricWeight",
@@ -107,7 +107,7 @@ pub const OPTIONS: &[OptionSpec] = &[
             ("600", "半粗", "600"),
             ("700", "粗体", "700"),
         ],
-        default: "700",
+        default: "500",
     },
     OptionSpec {
         key: "lyricBlur",
@@ -221,7 +221,7 @@ mod tests {
     fn only_known_values_can_reach_style_properties() {
         let mut v = json!({"uiPreferences":{"shape":"url(malicious)","lyricSize":"999"}});
         assert_eq!(get(&v, "shape"), "rounded");
-        assert_eq!(get(&v, "lyricSize"), "28");
+        assert_eq!(get(&v, "lyricSize"), "24");
         assert!(!set(&mut v, "shape", "invalid"));
         assert!(set(&mut v, "shape", "circle"));
         assert_eq!(get(&v, "shape"), "circle");

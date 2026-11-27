@@ -26,7 +26,7 @@ data class PlaybackSnapshot(
     val playing:Boolean=false, val position:Int=0, val duration:Int=0,
     val lyric:String="", val translation:String="", val error:String="", val token:String="",val quality:String="",val qualityPending:Boolean=false,val downgraded:Boolean=false,
     val sleepRemainingSeconds:Int=0,val sleepAfterTrack:Boolean=false,val sleepFinished:Boolean=false,val sleepMinutes:Int=0,
-    val queueJson:String="[]",val index:Int=-1,val wordLyrics:String="[]"
+    val queueJson:String="[]",val index:Int=-1,val wordLyrics:String="[]",val speed:Float=1f,val pauseFade:Boolean=false,val audioSession:Int=0
 )
 
 class PlayerService : Service() {
@@ -82,10 +82,42 @@ class PlayerService : Service() {
     private var selectionPending=false
     private var selectionInterruptedBySleep=false
     private var lastSave=0L
+    private var playbackSpeed=1f
+    private var pauseFade=false
+    private var fadeFrames=JSONArray()
+    private var fadeGeneration=0
+    private var outputVolume=1f
+    private fun configureAudio(speed:Double,fade:Boolean){
+        val result=runCatching{JSONObject(RustCore.call("audio_plan",JSONObject().put("speed",speed).put("fade",fade).toString()))}.getOrNull()?:return
+        if(!result.optBoolean("ok"))return
+        val data=result.getJSONObject("data")
+        val requestedSpeed=data.getDouble("speed").toFloat()
+        if(prepared){val wasPlaying=player?.isPlaying==true
+            if(runCatching{player?.playbackParams=android.media.PlaybackParams().setSpeed(requestedSpeed).setPitch(1f)}.isFailure){playbackError="此音频暂不支持该播放速度";updateSnapshot();return}
+            if(!wasPlaying)player?.pause()
+        }
+        playbackSpeed=requestedSpeed;pauseFade=data.optBoolean("fade");fadeFrames=data.getJSONArray("frames")
+        getSharedPreferences("library",MODE_PRIVATE).edit().putFloat("playback_speed",playbackSpeed).putBoolean("pause_fade",pauseFade).apply()
+        if(!pauseFade){fadeGeneration++;if(prepared&&!wantPlay)player?.pause();outputVolume=if(playing)1f else 0f;player?.setVolume(outputVolume,outputVolume)}
+        updateSnapshot()
+    }
+    private fun applySpeed(media:MediaPlayer){if(runCatching{media.playbackParams=android.media.PlaybackParams().setSpeed(playbackSpeed).setPitch(1f)}.isFailure){playbackSpeed=1f;playbackError="此音频暂不支持变速，已使用原速";getSharedPreferences("library",MODE_PRIVATE).edit().putFloat("playback_speed",1f).apply()}}
+    private fun fadeVolume(target:Float,done:()->Unit={}){
+        val token=++fadeGeneration;val media=player;val start=outputVolume
+        if(!pauseFade||fadeFrames.length()==0){outputVolume=target;runCatching{media?.setVolume(target,target)};done();return}
+        for(i in 0 until fadeFrames.length()){
+            val frame=fadeFrames.getJSONObject(i)
+            ui.postDelayed({if(token==fadeGeneration&&player===media){
+                outputVolume=start+(target-start)*frame.optDouble("value").toFloat();runCatching{media?.setVolume(outputVolume,outputVolume)}
+                if(i==fadeFrames.length()-1)done()
+            }},frame.optLong("at"))
+        }
+    }
     private var foreground=false
 
     override fun onCreate() {
         super.onCreate()
+        val audio=getSharedPreferences("library",MODE_PRIVATE);configureAudio(audio.getFloat("playback_speed",1f).toDouble(),audio.getBoolean("pause_fade",false))
         order.setMode(runCatching{PlaybackOrder.Mode.valueOf(getSharedPreferences("library",MODE_PRIVATE).getString("playback_mode","ORDER")?:"ORDER")}.getOrDefault(PlaybackOrder.Mode.ORDER))
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel("playback", "音乐播放", NotificationManager.IMPORTANCE_LOW))
@@ -130,6 +162,12 @@ class PlayerService : Service() {
                 if(autoPlay)sleepFinished=false
                 play(url,startPosition=intent.getIntExtra("position",0).coerceAtLeast(0),autoPlay=autoPlay)
             }
+            "AUDIO_SETTINGS" -> configureAudio(intent.getStringExtra("speed")?.toDoubleOrNull()?:1.0,intent.getStringExtra("fade")=="true")
+            "QUEUE_EDIT" -> {
+                val incoming=runCatching{JSONArray(intent.getStringExtra("queue")?:"[]")}.getOrNull()
+                val index=intent.getIntExtra("index",-1)
+                if(!skipPending&&incoming!=null&&index in 0 until incoming.length()&&incoming.optJSONObject(index)?.optString("mid")==song.optString("mid")){queue=incoming;queueJson=queue.toString();currentIndex=index;order.reset(queue.length(),currentIndex);PlaybackStore.save(this,song,queue.objects(),currentIndex,positionMs,durationMs);publish()}
+            }
             "QUALITY" -> changeQuality(intent.getStringExtra("quality")?:"auto",intent.getStringExtra("fallback")!="false")
             "SELECT" -> {selectionPending=true;selectionInterruptedBySleep=false;generation++;if(skipPending)order.reset(queue.length(),currentIndex);qualityPending=false;skipPending=false;if(player==null)loading=false;pause()}
             "SLEEP" -> {
@@ -165,20 +203,21 @@ class PlayerService : Service() {
     private fun play(url:String,startPosition:Int=0,autoPlay:Boolean=true) {
         if(autoPlay)sleepFinished=false
         playbackError=""
-        player?.release()
+        fadeGeneration++;player?.release();outputVolume=if(autoPlay&&pauseFade)0f else 1f
         playing = false;prepared=false;loading=true;wantPlay=autoPlay;positionMs=startPosition;artwork=null
         durationMs=(song.optLong("duration").coerceIn(0,Int.MAX_VALUE/1000L)*1000).toInt()
         player = MediaPlayer().apply {
+            setVolume(outputVolume,outputVolume)
             setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
             setOnPreparedListener { if(player===it){
                 prepared=true
                 expireSleepTimer()
                 if(startPosition>0){loading=true;it.seekTo(startPosition.coerceAtMost((it.duration-1).coerceAtLeast(0)))}
-                else{loading=false;if(wantPlay){it.start();playing=true;recordListening()}}
+                else{loading=false;if(wantPlay){applySpeed(it);it.start();playing=true;fadeVolume(1f);recordListening()}}
                 publish()
             } }
-            setOnSeekCompleteListener{if(player===it){positionMs=it.currentPosition;expireSleepTimer();if(loading){loading=false;if(wantPlay){it.start();playing=true;recordListening()}};publish()}}
+            setOnSeekCompleteListener{if(player===it){positionMs=it.currentPosition;expireSleepTimer();if(loading){loading=false;if(wantPlay){applySpeed(it);it.start();playing=true;fadeVolume(1f);recordListening()}};publish()}}
             setOnCompletionListener { if(player===it){playing=false;if(sleepTimer.consumeTrackEnd()){finishSleep()}else{publish();skip(1,true)}} }
             setOnErrorListener { failedPlayer, what, extra -> if(player!==failedPlayer)return@setOnErrorListener true;playbackError="音频加载失败（$what / $extra），请重试或切换歌曲"; prepared=false;loading=false;playing = false; publish(); true }
             setDataSource(this@PlayerService, android.net.Uri.parse(url), mapOf("Referer" to "https://y.qq.com/", "User-Agent" to "Mozilla/5.0"))
@@ -194,11 +233,14 @@ class PlayerService : Service() {
         }
     }
 
-    private fun pause() { wantPlay=false;if(prepared && playing)player?.pause();playing=false;publish() }
+    private fun pause() { wantPlay=false;val media=player;val canPause=prepared&&runCatching{media?.isPlaying==true}.getOrDefault(false);playing=false
+        if(canPause)fadeVolume(0f){if(player===media&&!wantPlay){runCatching{media?.pause()};publish()}}else{fadeGeneration++}
+        publish()
+    }
     private fun resume() {
         if(expireSleepTimer())return
         sleepFinished=false;wantPlay=true
-        if(prepared&&!loading){player?.start();playing=true;recordListening();publish()}
+        if(prepared&&!loading){player?.let{applySpeed(it);it.start()};playing=true;fadeVolume(1f);recordListening();publish()}
         else if(!loading&&song.optString("mid").isNotBlank())resolveSavedPlayback()
         else publish()
     }
@@ -209,7 +251,7 @@ class PlayerService : Service() {
         if(player==null&&song.optString("mid").isNotBlank())PlaybackStore.save(this,song,queue.objects(),currentIndex,target,durationMs)
         publish()
     }
-    private fun stopPlayback() { persistPlayback(true,true);sleepTimer.clear();sleepFinished=false;generation++;actualQuality="";qualityPending=false;skipPending=false;downgraded=false;player?.release(); player = null;song=JSONObject();queue=JSONArray();queueJson="[]";lyric="";translation="";wordLyrics="[]";currentArtwork="";currentIndex=-1;positionMs=0;durationMs=0;playbackError="";prepared=false;loading=false;playing=false;publish();foreground=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf() }
+    private fun stopPlayback() { fadeGeneration++;persistPlayback(true,true);sleepTimer.clear();sleepFinished=false;generation++;actualQuality="";qualityPending=false;skipPending=false;downgraded=false;player?.release(); player = null;song=JSONObject();queue=JSONArray();queueJson="[]";lyric="";translation="";wordLyrics="[]";currentArtwork="";currentIndex=-1;positionMs=0;durationMs=0;playbackError="";prepared=false;loading=false;playing=false;publish();foreground=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf() }
 
     private fun persistPlayback(force:Boolean=false,sync:Boolean=false){
         if(!prepared||loading||song.optString("mid").isBlank())return
@@ -324,7 +366,7 @@ class PlayerService : Service() {
         }
     }
 
-    private fun updateSnapshot(){snapshot=PlaybackSnapshot(song.optString("mid"),currentTitle,currentArtist,currentArtwork,playing,positionMs,durationMs,lyric,translation,playbackError,playToken,actualQuality,qualityPending,downgraded,((sleepTimer.remaining(SystemClock.elapsedRealtime())+999)/1000).toInt(),sleepTimer.isAfterTrack,sleepFinished,sleepTimer.minutes,queueJson,currentIndex,wordLyrics)}
+    private fun updateSnapshot(){snapshot=PlaybackSnapshot(song.optString("mid"),currentTitle,currentArtist,currentArtwork,playing,positionMs,durationMs,lyric,translation,playbackError,playToken,actualQuality,qualityPending,downgraded,((sleepTimer.remaining(SystemClock.elapsedRealtime())+999)/1000).toInt(),sleepTimer.isAfterTrack,sleepFinished,sleepTimer.minutes,queueJson,currentIndex,wordLyrics,playbackSpeed,pauseFade,if(prepared)player?.audioSessionId?:0 else 0)}
 
     private fun publish() {
         val duration = (if(prepared)player?.duration?.toLong() else null)?.takeIf { it > 0 } ?: durationMs.toLong().takeIf{it>0} ?: song.optLong("duration") * 1000
@@ -354,7 +396,7 @@ class PlayerService : Service() {
         session.setPlaybackState(PlaybackState.Builder()
             .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_STOP or PlaybackState.ACTION_SEEK_TO or PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS)
             .setState(if(loading)PlaybackState.STATE_BUFFERING else if(playbackError.isNotEmpty()&&!playing)PlaybackState.STATE_ERROR else if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
-                positionMs.toLong(), if (playing) 1f else 0f, SystemClock.elapsedRealtime()).build())
+                positionMs.toLong(), if (playing) playbackSpeed else 0f, SystemClock.elapsedRealtime()).build())
         if (foreground) getSystemService(NotificationManager::class.java).notify(42, notification())
         sendBroadcast(Intent("dev.qqlyric.app.PLAYBACK").setPackage(packageName)
             .putExtra("playing", playing).putExtra("position", positionMs))

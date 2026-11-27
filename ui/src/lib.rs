@@ -64,6 +64,8 @@ struct App {
     translations: Vec<(i32, String)>,
     word_lines: Vec<Vec<karaoke::Word>>,
     word_nodes: Vec<Vec<HtmlElement>>,
+    glyph_nodes: Vec<Vec<Vec<HtmlElement>>>,
+    glyph_fills: Vec<Vec<Vec<i32>>>,
     word_fills: Vec<Vec<i32>>,
     browse_until: f64,
     lyric_scroll: f64,
@@ -227,6 +229,19 @@ pub fn start() -> Result<(), JsValue> {
             .target()
             .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
         {
+            if input.id() == "playback-speed" {
+                let speed = input.value_as_number().clamp(0.25, 2.0);
+                if let Some(track) = input.parent_element() {
+                    style(
+                        &track,
+                        "--speed-progress",
+                        &format!("{}%", (speed - 0.25) / 1.75 * 100.0),
+                    );
+                }
+                if let Some(label) = el("speed-value") {
+                    label.set_text_content(Some(&format!("×{speed:.2}")));
+                }
+            }
             if input.has_attribute("data-seek") {
                 APP.with(|state| {
                     state.borrow_mut().scrubbing = true;
@@ -247,12 +262,15 @@ pub fn start() -> Result<(), JsValue> {
         {
             // A search submission blurs its field synchronously. Its change event
             // must not re-enter UI state while the submit handler owns that state.
-            if !input.has_attribute("data-seek") && input.id() != "custom-color" {
+            if !input.has_attribute("data-seek")
+                && !matches!(input.id().as_str(), "custom-color" | "playback-speed")
+            {
                 return;
             }
             APP.with(|state|{let mut app=state.borrow_mut();
                 if input.has_attribute("data-seek"){app.scrubbing=false;app.mini_until=now()+4500.0;post(json!({"type":"seek","position":(input.value_as_number()/1000.0*n(&app.live,"duration")as f64)as i32}));}
                 if input.id()=="custom-color"{post(json!({"type":"monet","key":"color","value":input.value().trim_start_matches('#')}));}
+                if input.id()=="playback-speed"{post(json!({"type":"audio_settings","speed":input.value_as_number().clamp(0.25,2.0),"fade":b(&app.live,"pauseFade")}));}
             });
         }
     });
@@ -492,6 +510,9 @@ pub fn update(input: &str) {
                 }
                 app.paint_progress();
                 app.sync_lyrics();
+                if matches!(app.sheet.as_str(), "audio-effects") {
+                    app.paint_overlay();
+                }
             }
             "open_player" => app.open_player(),
             _ => {}
@@ -702,6 +723,22 @@ impl App {
                     json!({"type":"transport","action":if b(&self.live,"playing"){"PAUSE"}else{"RESUME"}}),
                 );
             }
+            "enqueue-next" | "enqueue-tail" => {
+                post(
+                    json!({"type":"enqueue","mid":s(&self.live,"mid"),"next":action=="enqueue-next"}),
+                );
+            }
+            "share-song" | "system-equalizer" | "misound" => post(json!({"type":action})),
+            "show-song-info" => {
+                self.sheet.clear();
+                self.sheet_stack.clear();
+                self.paint_overlay();
+                self.player_page = 0;
+                self.show_player_page();
+            }
+            "speed-reset" | "toggle-pause-fade" => post(
+                json!({"type":"audio_settings","speed":if action=="speed-reset"{1.0}else{self.live["speed"].as_f64().unwrap_or(1.0)},"fade":if action=="toggle-pause-fade"{!b(&self.live,"pauseFade")}else{b(&self.live,"pauseFade")}}),
+            ),
             "previous" | "next" => {
                 self.mini_until = now() + 4500.0;
                 post(json!({"type":"transport","action":action.to_uppercase()}));
@@ -788,9 +825,12 @@ impl App {
             "play_tracks" => post(json!({"type":"play_all","shuffle":false})),
             "shuffle_tracks" => post(json!({"type":"play_all","shuffle":true})),
             "queue" | "quality" | "sleep" | "song-actions" | "add-playlist" | "logout"
-            | "clear_recent" => {
+            | "audio-effects" | "lyrics-appearance" | "clear_recent" => {
                 if self.sheet == "song-actions"
-                    && matches!(action, "quality" | "sleep" | "add-playlist")
+                    && matches!(
+                        action,
+                        "quality" | "sleep" | "add-playlist" | "audio-effects"
+                    )
                 {
                     self.sheet_stack.push(self.sheet.clone());
                 } else {
@@ -963,6 +1003,36 @@ impl App {
     }
 
     fn cache_lyric_nodes(&mut self) {
+        self.glyph_fills = self
+            .word_lines
+            .iter()
+            .map(|words| {
+                words
+                    .iter()
+                    .map(|w| vec![-1; karaoke::pieces(&w.text).len()])
+                    .collect()
+            })
+            .collect();
+        self.glyph_nodes = self
+            .word_lines
+            .iter()
+            .enumerate()
+            .map(|(i, words)| {
+                words
+                    .iter()
+                    .enumerate()
+                    .map(|(j, w)| {
+                        karaoke::pieces(&w.text)
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(k, _)| {
+                                el(&format!("glyph-{i}-{j}-{k}")).and_then(|e| e.dyn_into().ok())
+                            })
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect();
         self.lyric_viewport = el("lyric-viewport").and_then(|e| e.dyn_into().ok());
         self.word_nodes = self
             .word_lines
@@ -1459,7 +1529,14 @@ impl App {
             !self.sheet_stack.is_empty(),
         );
         match (&self.painted_overlay, &next) {
-            (Some(old), Some(new)) if old.class == new.class => {
+            (Some(old), Some(new))
+                if old.class == new.class || old.class != "qr-sheet" && new.class != "qr-sheet" =>
+            {
+                if old.class != new.class {
+                    if let Some(sheet) = el("sheet") {
+                        let _ = sheet.set_attribute("class", &format!("sheet {}", new.class));
+                    }
+                }
                 if old.title != new.title {
                     if let Some(sheet) = el("sheet") {
                         class(&sheet, "enter", false);
@@ -1526,7 +1603,8 @@ impl App {
         }
         let position = n(&self.live, "position")
             + if b(&self.live, "playing") {
-                (now() - self.clock_at).clamp(0.0, 250.0) as i32
+                ((now() - self.clock_at).clamp(0.0, 250.0)
+                    * self.live["speed"].as_f64().unwrap_or(1.0)) as i32
             } else {
                 0
             };
@@ -1540,7 +1618,8 @@ impl App {
                 self.word_nodes.get(index),
                 self.word_fills.get_mut(index),
             ) {
-                for ((word, node), previous) in words.iter().zip(nodes).zip(fills) {
+                for (j, ((word, node), previous)) in words.iter().zip(nodes).zip(fills).enumerate()
+                {
                     let fill = karaoke::fill(word, position);
                     if *previous != fill {
                         let _ = node.style().set_property(
@@ -1548,6 +1627,48 @@ impl App {
                             &format!("{:.2}%", fill as f64 * 0.116 - 8.0),
                         );
                         *previous = fill;
+                        if let Some(glyphs) = self.glyph_nodes.get(index).and_then(|row| row.get(j))
+                        {
+                            for (k, glyph) in glyphs.iter().enumerate() {
+                                let reveal_units =
+                                    (fill * glyphs.len() as i32 - k as i32 * 1000).clamp(0, 1000);
+                                if let Some(previous) = self
+                                    .glyph_fills
+                                    .get_mut(index)
+                                    .and_then(|row| row.get_mut(j))
+                                    .and_then(|word| word.get_mut(k))
+                                {
+                                    if *previous == reveal_units {
+                                        continue;
+                                    }
+                                    *previous = reveal_units;
+                                }
+                                let effect = karaoke::effect(
+                                    fill as f64 / 1000.0,
+                                    k,
+                                    glyphs.len(),
+                                    word.end - word.start,
+                                    self.reduced,
+                                );
+                                let _ = glyph.style().set_property(
+                                    "transform",
+                                    &format!(
+                                        "translateY(calc(var(--lyric-size) * {:.5})) scale({:.4})",
+                                        effect.lift, effect.scale
+                                    ),
+                                );
+                                let _ = glyph
+                                    .style()
+                                    .set_property("--glyph-glow", &format!("{:.4}", effect.glow));
+                                let reveal = (fill as f64 / 1000.0 * glyphs.len() as f64
+                                    - k as f64)
+                                    .clamp(0.0, 1.0);
+                                let _ = glyph.style().set_property(
+                                    "--glyph-fill",
+                                    &format!("{:.2}%", reveal * 116.0 - 8.0),
+                                );
+                            }
+                        }
                     }
                 }
             }
