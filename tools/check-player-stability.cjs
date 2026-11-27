@@ -16,5 +16,11 @@ const live={mid:song.mid,title:song.title,artist:song.artist,cover:song.coverUrl
  state.lyrics+='\n[00:10.000]A late line';state.translation='[00:05.000]仍在原处';await content();if(!await p.evaluate(()=>window.__lyricViewport===document.querySelector('#lyric-viewport')&&window.__cover===document.querySelector('#cover-art')))failures.push('Late lyrics recreate the full player');
  await p.waitForTimeout(100);assert.ok((await p.locator('#lyric-1').innerText()).includes('仍在原处'));
  await p.evaluate(()=>auralisBack());await p.waitForTimeout(800);await p.locator('#mini-player .mini-meta').click();await p.waitForTimeout(750);assert.equal(await p.locator('#player').evaluate(e=>e.classList.contains('mounted')),true);
- assert.deepEqual(failures,[]);console.log('PASS: opening pose has no restore flip; controls, late lyrics and warm reopen retain cover/background/pager/lyric hosts.');
+ assert.equal(await p.locator('#lyric-viewport').evaluate(e=>getComputedStyle(e).visibility),'hidden','Offscreen masked lyrics still paint during the cover opening');
+ assert.equal(await p.locator('.cover-pane').evaluate(e=>getComputedStyle(e).visibility),'visible');
+ await p.locator('[data-action=player_lyrics]').click();await p.waitForTimeout(650);
+ assert.equal(await p.locator('#lyric-viewport').evaluate(e=>getComputedStyle(e).visibility),'visible','Lyrics were not revealed on arrival');
+ assert.equal(await p.locator('.cover-pane').evaluate(e=>getComputedStyle(e).visibility),'hidden');
+ assert.ok(await p.evaluate(()=>window.__lyricViewport===document.querySelector('#lyric-viewport')),'Pane culling discarded the retained lyric viewport');
+ assert.deepEqual(failures,[]);console.log('PASS: opening pose has no restore flip; controls, late lyrics and warm reopen retain hosts; only intersecting pager panes paint.');
 }finally{await browser.close()}})().catch(e=>{console.error(e);process.exitCode=1});

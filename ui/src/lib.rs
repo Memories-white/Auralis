@@ -83,6 +83,7 @@ struct App {
     lyric_velocity: f64,
     row_motion: HashMap<usize, lyric_motion::RowMotion>,
     lyric_nodes: Vec<HtmlElement>,
+    lyric_nodes_pending: bool,
     lyric_viewport: Option<HtmlElement>,
     lyric_dirty: bool,
     lyric_height: i32,
@@ -106,6 +107,7 @@ struct App {
     sheet_radius: f64,
     pager: motion::Spring,
     pager_layer: Option<Element>,
+    pager_panes: Vec<Element>,
     pager_dragging: bool,
     pager_start: f64,
     pager_width: f64,
@@ -399,9 +401,6 @@ pub fn start() -> Result<(), JsValue> {
                     if app.pager_dragging || (dx.abs() > 10.0 && dx.abs() > dy.abs() * 1.35) {
                         if !app.pager_dragging {
                             app.pager_dragging = true;
-                            if app.pager_start > 0.5 && app.pager_start < 1.5 && dx < 0.0 {
-                                app.ensure_lyrics();
-                            }
                         }
                         let width = app.pager_width;
                         let p = app.pager_start - dx / width;
@@ -414,6 +413,13 @@ pub fn start() -> Result<(), JsValue> {
                         };
                         app.pager.place(p);
                         app.paint_pager();
+                        if p > 1.0 {
+                            app.ensure_lyrics();
+                            if app.lyric_nodes_pending {
+                                app.cache_lyric_nodes();
+                                app.sync_lyrics();
+                            }
+                        }
                         app.suppress_click = now() + 350.0;
                     }
                 }
@@ -1316,7 +1322,7 @@ impl App {
             &self.lines,
             &self.translations,
             &self.word_lines,
-            render_lyrics,
+            render_lyrics && !retained,
         );
         if self.player_markup == html && !document_changed && !layout_changed {
             self.show_player_page();
@@ -1329,19 +1335,7 @@ impl App {
             // The persistent cover, background, pager and lyric viewport must not
             // lose transforms/decoded images when only controls or lyrics change.
             if let Ok(staging) = doc().create_element("div") {
-                let chrome = if render_lyrics {
-                    render::player(
-                        &self.live,
-                        &self.data,
-                        &self.lines,
-                        &self.translations,
-                        &self.word_lines,
-                        false,
-                    )
-                } else {
-                    html.clone()
-                };
-                staging.set_inner_html(&chrome);
+                staging.set_inner_html(&html);
                 for selector in [
                     ".player-footer>.transport",
                     ".player-tools",
@@ -1401,6 +1395,19 @@ impl App {
     }
 
     fn cache_lyric_nodes(&mut self) {
+        if el("lyric-viewport")
+            .and_then(|e| e.dyn_into::<HtmlElement>().ok())
+            .is_some_and(|e| {
+                e.style()
+                    .get_property_value("content-visibility")
+                    .unwrap_or_default()
+                    == "hidden"
+            })
+        {
+            self.lyric_nodes_pending = true;
+            return;
+        }
+        self.lyric_nodes_pending = false;
         self.glyph_fills = self
             .word_lines
             .iter()
@@ -1675,6 +1682,31 @@ impl App {
         if let Some(pages) = self.pager_layer.as_ref() {
             style(pages, "--page", &self.pager.position.to_string());
         }
+        // A translated, clipped sibling can still rasterize its mask and every
+        // blurred glyph. Keep layout/decoded nodes, but only paint panes actually
+        // intersecting the viewport. Reveal the adjacent pane during the swipe.
+        for (index, pane) in self.pager_panes.iter().enumerate() {
+            let visibility = if (self.pager.position - index as f64).abs() < 0.9999
+                || index == self.player_page
+            {
+                "visible"
+            } else {
+                "hidden"
+            };
+            if let Some(pane) = pane.dyn_ref::<HtmlElement>() {
+                if pane
+                    .style()
+                    .get_property_value("visibility")
+                    .unwrap_or_default()
+                    != visibility
+                {
+                    let _ = pane.style().set_property("visibility", visibility);
+                    // Skip descendant style/layout as well as rasterization while
+                    // offscreen. The fixed flex pane still owns its full size.
+                    let _ = pane.style().set_property("content-visibility", visibility);
+                }
+            }
+        }
     }
     fn advance_pager(&mut self, dt: f64) {
         if self.player && !self.pager_dragging && !self.pager.settled() {
@@ -1687,14 +1719,21 @@ impl App {
         }
     }
     fn show_player_page(&mut self) {
-        self.ensure_lyrics();
-        self.fit_cover();
         self.pager_layer = el("player-pages");
+        self.pager_panes = [".information-pane", ".cover-pane", "#lyric-viewport"]
+            .iter()
+            .filter_map(|selector| find(&format!("#player {selector}")))
+            .collect();
         if self.reduced {
             self.pager.place(self.player_page as f64);
         }
         self.pager.to(self.player_page as f64);
         self.paint_pager();
+        self.ensure_lyrics();
+        if self.player_page == 2 && self.lyric_nodes_pending {
+            self.cache_lyric_nodes();
+        }
+        self.fit_cover();
         if let Some(player) = el("player") {
             class(&player, "lyrics-page", self.player_page == 2);
         }
@@ -2128,7 +2167,11 @@ impl App {
         }
     }
     fn sync_lyrics(&mut self) {
-        if !self.player || self.lines.is_empty() {
+        if !self.player
+            || self.lines.is_empty()
+            || !self.lyrics_mounted
+            || (self.player_page != 2 && !self.pager_dragging && self.pager.settled())
+        {
             return;
         }
         let position = n(&self.live, "position")

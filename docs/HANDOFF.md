@@ -2,7 +2,38 @@
 
 > 每次改动后更新此表；入口约定已写入根目录 `AGENTS.md`。布局、交互、设置校验和动画以 Rust 为主，Android 只做必要的平台桥接。
 
-## 当前交付 · 0.5.11
+## 当前交付 · 0.5.12
+
+| 项目 | 状态 / 入口 |
+| :-- | :-- |
+| 日期、版本 | 2026-11-27 · 0.5.12-preview · versionCode 39 |
+| 源码基线 | e5adfe729d64b246be050fa1127bf4c96c6d95e6，已推送0.5.11 |
+| 当前提交 | 此表随代码提交推送main；用git log -1读取完整SHA |
+| APK | APKs/Auralis-v0.5.12-preview.apk · 16241919字节 |
+| SHA256 | D423F1635E02B9842A18FC8F74836356DBA66F3C4CC0A0183A89C2948E4FFA89 |
+| 安装 / 签名 | 保留数据安装code39成功；手机回读base.apk哈希一致；原证书v2通过 |
+| 发布 | 推送源码，不创建Release；APK、实机截图、性能报告在忽略目录 |
+
+### 本轮交接表：点击歌曲栏展开卡顿
+
+| 请求 / 根因 | 改动入口 | 验证 / 限制 |
+| :-- | :-- | :-- |
+| 已看过歌词后展开卡顿 | ui/src/lib.rs::paint_pager/show_player_page缓存三个pane；Rust按可视交集与目标页设置visibility/content-visibility | 旧code38手机三次展开均出现139–147ms长任务；临时关闭模糊/圆角仍有停顿，而隐藏离屏歌词Paint总耗时降到18–22ms，证实离屏遮罩/字形参与绘制。临时样式和桥接隔离均已还原，不作为产品改动 |
+| 重复生成完整歌词字符串 | paint_player同曲仅生成控制区markup；真正歌词文档变化才单独生成lyrics | 封面/背景/歌词节点继续保留；避免先生成完整歌词再生成无歌词chrome。没有删除歌词、图片缓存或逐字动效 |
+| 隐藏页面仍更新字形、隐藏时测量为零 | sync_lyrics暂停稳定离屏页；cache_lyric_nodes标记pending；show_player_page与pointermove先恢复pane，再建立/测量歌词节点 | 拖入或点入歌词均恢复；隐藏时到达的新歌词不会缓存零宽度。保留左右滑动、取消、暂停、进度与高刷新率桥接 |
+| 最终手机采样 | tools/profile-player-open.cjs：先看歌词、返回，然后三次打开，各采样900ms；报告usb-0512/open-final.json | 点击同步处理13.5/8.1/11.4ms；三次均无Long Tasks条目；Paint总耗时28.5/28.0/30.4ms，旧包69–74ms。回调P95约16.5–16.6ms；最大间隔33.3/32.7/50.1ms，仍有离散停顿，不称全程120fps/零卡顿。CDP跟踪和回调不等于GPU呈现帧 |
+| 回归与安装 | check-player-stability新增离屏不绘制、进入恢复可见、节点不丢失断言；check-player-handoff及原check-rust-ui/check-player-rapid-toggle | 全部通过；手机节点复用/3次warm reopen通过，最终包8轮快速开关及尾段反向通过。UI32/core44/Java4组、完整WASM/NDK/Gradle与签名通过；最后pointermove测量顺序调整后重跑handoff/stability及实机采样/快速开关 |
+| 数据 / 边界 | 手机当前原歌曲保持暂停；无登录/播放协议修改，不清数据、不换歌、无系统刷新率设置更改 | 系统截图歌曲栏恢复；9228转发移除。未重新验证云端播放权益、所有设备或所有字号；当前只对展开路径有前后性能证据 |
+
+### 下一位AI
+
+- 手机最终安装code39；继续前实时核对USB与版本。用户数据保留，私有证据不提交。
+- 不要让离屏pane仅靠横向transform/overflow隐藏，也不要在content-visibility:hidden时采集字形宽度。
+- 后续若追查剩余偶发长帧，应采集实际呈现链路并区分点击准备、WebView绘制与GPU；不以缩短动画时间代替性能修复。
+
+---
+
+## 0.5.11 历史交付
 
 | 项目 | 状态 / 入口 |
 | :-- | :-- |
