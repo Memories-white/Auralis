@@ -1842,11 +1842,9 @@ impl App {
             }
             self.paint_mini_pose();
         }
-        self.morph = if self.reduced {
-            None
-        } else {
-            self.measure_morph()
-        };
+        // The full page enters as one sheet, including its original artwork.
+        // Avoid a second moving copy of the mini-player cover.
+        self.morph = None;
         self.cache_sheet_layers();
         if self.reduced {
             let target = if open { 1.0 } else { 0.0 };
@@ -1929,32 +1927,23 @@ impl App {
         let p = p.clamp(0.0, 1.0);
         let q = 1.0 - p;
         let blend = motion::sheet_blend(p);
-        let [x, y, mw, mh] = self.sheet_bounds;
-        let sx = (mw + (layers.width - mw) * p) / layers.width.max(1.0);
-        let sy = (mh + (layers.height - mh) * p) / layers.height.max(1.0);
+        let offset = layers.height * q;
         style(
             &layers.surface,
             "transform",
-            &format!(
-                "translate3d({:.3}px,{:.3}px,0) scale({:.6},{:.6})",
-                x * q,
-                y * q,
-                sx,
-                sy
-            ),
+            &format!("translate3d(0,{offset:.3}px,0)"),
         );
-        let r = self.sheet_radius * q * q;
         style(
             &layers.surface,
             "border-radius",
-            &format!("{}px / {}px", r / sx.max(0.001), r / sy.max(0.001)),
+            &format!("{:.3}px", 24.0 * q),
         );
         style(&layers.surface, "opacity", &blend.background.to_string());
         style(&layers.content, "opacity", &blend.content.to_string());
         style(
             &layers.content,
             "transform",
-            &format!("translate3d(0,{:.3}px,0)", 18.0 * q),
+            &format!("translate3d(0,{offset:.3}px,0)"),
         );
         style(&layers.mini, "opacity", &blend.mini.to_string());
         style(&layers.nav, "opacity", &blend.mini.to_string());
