@@ -90,6 +90,7 @@ struct App {
     clock_at: f64,
     mini_expanded: bool,
     mini_written: f64,
+    dock_extra: f64,
     mini: motion::Spring,
     dock: motion::Spring,
     nav_element: Option<Element>,
@@ -655,14 +656,19 @@ impl App {
                 "home" | "collection" | "mine" | "settings"
             );
             let bottom = shell::floating_bottom(safe);
-            let clearance = if wide || !root_page {
-                92.0 + safe
-            } else if floating {
-                144.0 + bottom
+            let metrics = shell::dock_metrics(wide, root_page, floating, safe);
+            self.dock_extra = metrics.extra;
+            let clearance = if shell::dock_visible(s(&self.data, "page")) {
+                metrics.clearance
             } else {
-                156.0 + safe
+                safe + 16.0
             };
-            style(&root, "--dock-clearance", &format!("{clearance}px"));
+            style(&root, "--dock-base-clearance", &format!("{clearance}px"));
+            style(
+                &root,
+                "--dock-clearance",
+                &format!("calc({clearance}px + var(--dock-extra, 0px))"),
+            );
             style(&root, "--floating-bottom", &format!("{bottom}px"));
             let count = self.dock_count.max(1);
             style(&root, "--floating-width", &format!("{}px", 8 + count * 100));
@@ -1523,8 +1529,13 @@ impl App {
         if self.mini.settled() && (self.mini.position - self.mini_written).abs() < 0.0005 {
             return;
         }
-        let value = self.mini.sample(dt, motion::Feel::REVEAL);
-        let expanded = target > 0.5;
+        let value = if self.reduced {
+            self.mini.place(target);
+            target
+        } else {
+            self.mini.sample(dt, motion::Feel::REVEAL)
+        };
+        let expanded = value > 0.25;
         if expanded != self.mini_expanded {
             if let Some(mini) = el("mini-player") {
                 class(&mini, "expanded", expanded);
@@ -1537,20 +1548,40 @@ impl App {
         }
     }
     fn paint_mini_pose(&self) {
+        let displacement = if shell::dock_visible(s(&self.data, "page")) {
+            self.dock_extra * self.mini.position.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        if let Some(root) = el("app") {
+            style(&root, "--dock-extra", &format!("{displacement:.3}px"));
+        }
         if let Some(mini) = el("mini-player") {
             style(&mini, "--mini", &format!("{:.4}", self.mini.position));
             class(&mini, "expanded", self.mini_expanded);
+            for (selector, available) in [
+                (".mini-compact", !self.mini_expanded),
+                (
+                    ".mini-expanded",
+                    self.mini_expanded && self.mini.position > 0.65,
+                ),
+            ] {
+                if let Ok(Some(group)) = mini.query_selector(selector) {
+                    let _ = group
+                        .set_attribute("aria-hidden", if available { "false" } else { "true" });
+                    if available {
+                        let _ = group.remove_attribute("inert");
+                    } else {
+                        let _ = group.set_attribute("inert", "");
+                    }
+                }
+            }
         }
         if let Some(actions) = el("float-actions") {
-            let extra = if customization::get(&self.data, "bar") == "floating" {
-                138.0
-            } else {
-                134.0
-            };
             style(
                 &actions,
                 "transform",
-                &format!("translateY({}px)", -extra * self.mini.position),
+                &format!("translateY({}px)", -displacement),
             );
         }
     }

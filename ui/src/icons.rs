@@ -64,7 +64,8 @@ fn stroke(name: &str) -> Option<(&'static str, bool)> {
 pub fn icon(name: &str) -> String {
     let (path, filled) = stroke(name).unwrap_or(("M12 4v16M4 12h16", false));
     format!(
-        "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\" fill=\"{}\" fill-rule=\"evenodd\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"{path}\"/></svg>",
-        if filled { "currentColor" } else { "none" }
+        "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\" fill=\"{}\" fill-rule=\"evenodd\" stroke=\"{}\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"{path}\"/></svg>",
+        if filled { "currentColor" } else { "none" },
+        if name.ends_with("-filled"){"none"}else{"currentColor"}
     )
 }

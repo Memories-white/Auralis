@@ -2,7 +2,45 @@
 
 > 每次改动后更新此表；入口约定已写入根目录 `AGENTS.md`。布局、交互、设置校验和动画以 Rust 为主，Android 只做必要的平台桥接。
 
-## 当前交付 · 0.5.8
+## 当前交付 · 0.5.9
+
+| 项目 | 状态 / 入口 |
+| :-- | :-- |
+| 日期、版本 | 2026-11-27 · 0.5.9-preview · versionCode 36 |
+| 源码基线 | b7ae6f87435df08fc628ab67d9f84bd425001c45，已推送的0.5.8 |
+| 当前提交 | 本表随本轮代码提交/推送main；用git log -1读取完整SHA，避免自引用 |
+| 本地APK | APKs/Auralis-v0.5.9-preview.apk · 16465320字节 |
+| SHA256 | 7D67A823C30FDC469AB539A7A93082FB9DA52A5E8F14044DEC34F5631E4A41B3 |
+| 签名 | 原debug证书，apksigner v2通过，包名不改 |
+| 安装 | 用户授权USB调试后adb install -r成功，手机确认code36；回读手机base.apk与上面哈希完全相同；未清数据 |
+| 发布 | 源码推送main；本轮不创建Release，APK仍在本地忽略目录 |
+
+### 本轮交接表：底栏系统排查与实机验证
+
+| 请求 / 缺陷 | 实现与入口 | 证据、限制 / 后续 |
+| :-- | :-- | :-- |
+| 手机连接后直接排查 | 确认原安装0.5.8/code35；在应用自身WebView调试端口检查，不读取其他应用内容 | 原版本四栏入口与多次返回正常，暂停歌曲已有60行歌词。未把这些已通过路径描述为新增修复；随后保留数据安装code36 |
+| 展开歌曲栏盖住列表末尾 | ui/src/shell.rs::dock_metrics统一实际mini、间距、导航、系统区与16px留白；lib.rs::layout_shell/paint_mini_pose驱动--dock-base-clearance和--dock-extra | 新check-dock-layout.cjs在修改前捕获最后一行超出mini顶部约116–150px；标准/悬浮、safe0/20/48修复后通过。蒙奈子页隐藏dock时仅预留系统区与16px，不保留空歌曲栏空间 |
+| 浮动定位按钮位置 | style.css::float-actions改用基础clearance，Rust只施加一次展开位移 | 避免新动态padding又叠加原transform导致按钮移动两次；回归检查按钮与mini上缘间距8–40px |
+| 系统手势区透出正文 | style.css::dock::after使用主题surface和真实safeBottom，放在明确前景层，pointer-events:none | 对照手机系统截图，旧包手势区底边露出页面字；新包恢复不透明安全区。WebView CDP截图可能显示与系统最终合成不同的底边内容，因此以adb系统截图复核，不只看CSS颜色 |
+| 悬浮样式宽屏失效 | style.css最终宽屏规则覆盖两种紧凑bar皮肤，恢复86px侧栏和64px项目 | 原浮动皮肤把rail变成408×64且按钮溢出；900×650真实WASM几何回归通过。手机只测竖屏，不声称实测平板/横屏 |
+| 底栏图标重边 | icons.rs仅对-filled导航图标关闭stroke；保留其他线性和播放控制图标 | 手机截图复核，移除实心图标额外描边，不改变四个目的地及选中状态 |
+| 隐藏控件仍可聚焦 / 收起交接 | lib.rs::paint_mini_pose对不可见compact/expanded组设置inert和aria-hidden；advance_mini按可见进度切换expanded类 | 隐藏按钮不参与点击/辅助焦点；收起中保留对应视觉状态，避免立即换成另一组。新回归验证collapsed时expanded组inert、compact组可用 |
+| 减少动态仍播放mini动画 | lib.rs::advance_mini在reduced时直接落到目标，不继续采样Spring | 真实WASM在两帧内验证--mini精确为1；其余cover/返回减少动态回归保留 |
+| 手机真实播放与队列 | tools/check-device-dock.cjs使用真实UI入口切换normal/floating并恢复原选择；点当前歌曲播放、队列、暂停、进入歌词和返回 | 两种样式都实际进入播放且时间推进，未换歌曲/队列；展开约202px，正常padding308px/悬浮322px，全部按钮在卡片内；队列打开成功，返回无mounted残留且dock不inert。测试后恢复原normal样式和暂停状态；播放位置自然前进几秒，没有修改收藏或云端歌单 |
+| 最终包复核 | 最后安全区合成层微调后重新安装同版code36，重测四入口、3次返回与暂停歌词；回读base.apk校验 | 手机与本地最终哈希一致；本应用作用域日志未见FATAL EXCEPTION/已借用WASM panic。不能据此保证所有设备/所有功能无BUG；原截图与私有日志留device-debug，不推送个人信息 |
+| 自动检查 | UI31/core44、Java4组、完整WASM/NDK/Gradle；check-dock-layout/check-player-handoff/check-rust-ui；样式lint | 均通过，lint0错误0警告。没有将浏览器回调当成手机GPU帧率；本轮重点是布局、输入与真实消费链路，不作帧率提升结论 |
+
+### 下一位AI
+
+1. 手机当前已安装上述最终包，用户授权USB调试仍有效；连接状态要实时核对，不重新要求清数据或登录。
+2. 临时9228调试转发已移除；调试需按当前应用PID重新forward到其WebView socket。不要复用旧PID或访问别的WebView。
+3. 如用户还有底栏问题，先核对code36，并询问/复现具体场景；保留本轮真实UI与失败回归。已测normal/floating的播放/队列/返回和60行暂停歌词，尚未测全部音质、蓝牙、长时间后台或每种字号。
+4. tests/scripts可输出私有设备截图到device-debug；该目录仍忽略。修改后继续更新交接表，分别记录源码、APK、安装和Release。
+
+---
+
+## 0.5.8 历史交付
 
 | 项目 | 状态 / 入口 |
 | :-- | :-- |
