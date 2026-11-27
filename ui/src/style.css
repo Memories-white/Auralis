@@ -111,7 +111,7 @@ h1 {
   min-height:0;
   overflow-y:auto;
   overscroll-behavior-y:contain;
-  padding:4px 0 24px;
+  padding:4px 0 calc(148px + var(--safe-bottom));
   scrollbar-width:none;
   position:relative;
   scroll-behavior:smooth
@@ -571,8 +571,8 @@ h1 {
 }
 .switch i {
   display:block;
-  width:23px;
-  height:23px;
+  width:25px;
+  height:25px;
   border-radius:50%;
   background:var(--card);
   box-shadow:0 1px 3px var(--control-shadow);
@@ -665,39 +665,44 @@ h1 {
   }
 }
 #dock {
+  position:absolute;left:0;right:0;bottom:0;
   flex:none;
-  padding:6px 14px calc(var(--safe-bottom) + 8px);
+  padding:0 16px max(24px,calc(var(--safe-bottom) + 8px));
   display:flex;
   flex-direction:column;
   gap:8px;
   z-index:2;
-  background:var(--bg)
+  background:transparent;
+  pointer-events:none
 }
+#dock>.mini,#dock>#navigation {pointer-events:auto}
 #dock.hidden {
   display:none
 }
 #navigation {
   position:relative;
-  height:64px;
+  --nav-inset:8px;--pill-overhang:5px;
+  --nav-selected:var(--fg);
+  height:54px;
   display:flex;
   align-items:stretch;
-  padding:5px;
+  padding:3px 8px;
   gap:0;
   background:var(--card);
-  border-radius:32px;
+  border-radius:27px;
   box-shadow:0 4px 18px #00000008;
   isolation:isolate
 }
 .nav-pill {
   position:absolute;
-  top:5px;
-  bottom:5px;
-  left:5px;
-  width:calc((100% - 10px) / var(--nav-count,3));
+  top:3px;
+  bottom:3px;
+  left:calc(var(--nav-inset) - var(--pill-overhang));
+  width:calc(var(--nav-slot,100px) + 2 * var(--pill-overhang));
   border-radius:27px;
-  background:color-mix(in srgb,var(--primary) 15%,var(--card));
-  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--primary) 18%,transparent);
-  transform:translateX(calc(var(--nav-index,0) * 100%)) scaleY(calc(1 - min(var(--nav-wobble,0),.5) * .14));
+  background:color-mix(in srgb,var(--fg) 8%,transparent);
+  box-shadow:none;
+  transform:translateX(calc(var(--nav-index,0) * var(--nav-slot,100px))) scaleY(calc(1 - min(var(--nav-wobble,0),.5) * .14));
   transform-origin:center;
   will-change:transform;
   pointer-events:none;
@@ -706,18 +711,18 @@ h1 {
 .nav-item {
   flex:1 1 0;
   min-width:0;
-  min-height:54px;
+  min-height:48px;
   position:relative;
   z-index:1;
   display:flex;
   align-items:center;
   justify-content:center;
-  gap:3px;
+  gap:0;
   flex-direction:column;
-  font-size:10.5px;
-  font-weight:600;
+  font-size:11px;
+  font-weight:500;
   letter-spacing:.1px;
-  color:color-mix(in srgb,var(--primary) calc(var(--nav-p,0) * 100%),var(--muted));
+  color:color-mix(in srgb,var(--nav-selected) calc(var(--nav-p,0) * 100%),var(--fg));
   background:transparent;
   border-radius:27px
 }
@@ -726,18 +731,18 @@ h1 {
   overflow:hidden;
   text-overflow:ellipsis;
   white-space:nowrap;
-  opacity:calc(.72 + var(--nav-p,0) * .28)
+  opacity:1
 }
 .nav-glyph {
   position:relative;
   display:grid;
   place-items:center;
-  width:23px;
-  height:23px
+  width:25px;
+  height:25px
 }
 .nav-glyph>svg,.nav-glyph-fill>svg {
-  width:23px;
-  height:23px
+  width:25px;
+  height:25px
 }
 .nav-glyph>svg {
   opacity:calc(1 - var(--nav-p,0) * .9)
@@ -750,9 +755,7 @@ h1 {
   opacity:var(--nav-p,0);
   transform:scale(calc(.78 + var(--nav-p,0) * .22))
 }
-.nav-item.selected {
-  color:var(--primary)
-}
+.nav-item.selected {font-weight:500}
 #dock.no-nav #navigation {
   display:none
 }
@@ -760,8 +763,8 @@ h1 {
   position:relative;
   isolation:isolate;
   flex:none;
-  height:calc(72px + 134px * var(--mini,0));
-  border-radius:30px;
+  height:calc(var(--mini-base,52px) + var(--mini-extra,150px) * var(--mini,0));
+  border-radius:26px;
   background:var(--card);
   overflow:hidden;
   box-shadow:0 4px 20px #0000000a;
@@ -772,16 +775,16 @@ h1 {
   left:0;
   right:0;
   top:0;
-  height:64px;
+  height:calc(var(--mini-base,52px) + 12px * var(--mini,0));
   display:flex;
   align-items:center;
-  padding:8px 10px 8px 12px;
-  gap:12px
+  padding:7px 7px 7px 8px;
+  gap:8px
 }
 .mini-art {
-  width:44px;
-  flex:0 0 44px;
-  border-radius:12px;
+    width:calc(var(--mini-art-size,38px) + 6px * var(--mini,0));
+    flex:0 0 calc(var(--mini-art-size,38px) + 6px * var(--mini,0));
+  border-radius:8px;
   box-shadow:0 3px 10px #00000010
 }
 .mini-meta {
@@ -997,13 +1000,13 @@ h1 {
 #player {
   position:absolute;
   inset:0;
-  background:var(--bg);
+  background:transparent;
   z-index:5;
   overflow:hidden;
   visibility:hidden;
   pointer-events:none;
-  opacity:var(--sheet-alpha,0);
-  will-change:clip-path
+  opacity:1;
+  contain:layout style;
 }
 #player.mounted {
   visibility:visible;
@@ -1028,7 +1031,8 @@ h1 {
   height:100%;
   padding-top:var(--safe-top);
   padding-bottom:calc(var(--safe-bottom) + 6px);
-  opacity:var(--sheet-content,0)
+  opacity:0;
+  will-change:opacity,transform
 }
 .player-toolbar {
   display:flex;
@@ -1122,7 +1126,7 @@ h1 {
   width:min(100%,400px);
   aspect-ratio:1;
   overflow:hidden;
-  opacity:var(--cover-opacity,1);
+  opacity:1;
   box-shadow:0 18px 40px #0000001f;
   transform:translateZ(0)
 }
@@ -1711,8 +1715,8 @@ h1 {
 .route-enter { animation:route-enter 320ms cubic-bezier(.2,0,0,1) both; }
 @keyframes route-enter { from { opacity:0; transform:translateY(8px) scale(.992); } to { opacity:1; transform:translateY(0) scale(1); } }
 
-/* The shared cover lives outside the player so it keeps painting while the clip
-   inset and the artwork geometry are sampled by Rust. Its radius is written in
+/* The shared cover lives outside the player so it keeps painting while the
+   surface and artwork geometry are sampled by Rust. Its radius is written in
    screen pixels; no class ever switches it. */
 #shared-artwork { position:fixed;top:0;left:0;z-index:6;pointer-events:none;transform-origin:0 0;will-change:transform,border-radius;overflow:hidden;border-radius:12px;background:color-mix(in srgb,var(--primary) 11%,var(--bg));contain:layout paint; }
 #shared-artwork .artwork { width:100%;height:100%;border-radius:0!important;box-shadow:none; }
@@ -1766,14 +1770,14 @@ h1 {
 /* ---- Dock variants ---- */
 #app[data-ui-bar="glass"] #navigation,
 #app[data-ui-bar="glass"] .mini {
-  background:color-mix(in srgb,var(--card) 78%,transparent);
+  background:color-mix(in srgb,var(--card) 72%,transparent);
   border:1px solid color-mix(in srgb,var(--border) 45%,transparent);
   backdrop-filter:blur(26px) saturate(1.55);
   -webkit-backdrop-filter:blur(26px) saturate(1.55)
 }
 #app[data-ui-bar="glass"] .nav-pill {
-  background:color-mix(in srgb,var(--primary) 12%,transparent);
-  backdrop-filter:blur(10px)
+  background:color-mix(in srgb,var(--nav-selected) 8%,transparent);
+  backdrop-filter:none
 }
 #app[data-ui-bar="normal"] #dock {
   padding-left:0;
@@ -1781,7 +1785,8 @@ h1 {
   gap:0
 }
 #app[data-ui-bar="normal"] #navigation {
-  height:74px;
+  --nav-inset:10px;--pill-overhang:0px;
+  height:64px;
   border-radius:0;
   background:var(--card);
   box-shadow:none;
@@ -1794,6 +1799,7 @@ h1 {
   -webkit-backdrop-filter:none
 }
 #app[data-ui-bar="normal"] .mini {
+  --mini-base:68px;--mini-extra:134px;--mini-art-size:48px;
   border-radius:0;
   box-shadow:none;
   border:0
@@ -1802,12 +1808,15 @@ h1 {
   border-radius:18px
 }
 #app[data-ui-bar="floating"] #navigation {
-  margin:0 16px;
+  --nav-inset:4px;--pill-overhang:0px;
+  height:64px;padding:4px;border-radius:32px;
+  width:min(100%,308px);margin:0 auto;
   border:1px solid color-mix(in srgb,var(--border) 80%,transparent);
   box-shadow:0 8px 26px #0000000f
 }
 #app[data-ui-bar="floating"] .mini {
-  margin:0 16px
+  --mini-base:64px;--mini-extra:138px;--mini-art-size:44px;
+  width:min(100%,308px);margin:0 auto
 }
 #app[data-ui-bar="floating"] .mini.compact,
 #app[data-ui-bar="floating"] .mini {
@@ -1825,7 +1834,7 @@ h1 {
 #app[data-ui-navlabels="off"] .navigation,.nav-item.with-no-label { min-height:54px }
 
 /* ---- Player background variants ---- */
-#app[data-ui-background="tonal"] #player { background:radial-gradient(ellipse at 15% 5%,color-mix(in srgb,var(--primary) 25%,var(--bg)),var(--bg) 75%); }
+#app[data-ui-background="tonal"] #player-surface { background:radial-gradient(ellipse at 15% 5%,color-mix(in srgb,var(--primary) 25%,var(--bg)),var(--bg) 75%); }
 #app[data-ui-background="plain"] .player-wash,
 #app[data-ui-background="tonal"] .player-wash,
 #app[data-ui-blur="off"] .player-wash { display:none }
@@ -1848,7 +1857,7 @@ h1 {
 .lyric-line.active .karaoke-word { --karaoke-muted:color-mix(in srgb,var(--fg) 42%,transparent); background:linear-gradient(90deg,var(--fg) calc(var(--word-fill,-8%) - 7%),var(--karaoke-muted) calc(var(--word-fill,-8%) + 7%)); background-clip:text; -webkit-background-clip:text; color:transparent; -webkit-text-fill-color:transparent; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
 .lyric-line.active small { opacity:.55; }
 #app[data-ui-lyriccontrols="off"] .lyrics-page .player-footer .transport { display:none; }
-#app[data-ui-motion="reduced"] .nav-pill { transform:translateX(calc(var(--nav-index,0) * 100%)) }
+#app[data-ui-motion="reduced"] .nav-pill { transform:translateX(calc(var(--nav-index,0) * var(--nav-slot,100px))) }
 
 @media(min-width:700px) {
   #app[data-ui-bar="floating"] #navigation { margin:0 auto; width:min(100%,620px) }
@@ -1873,3 +1882,15 @@ h1 {
 #app[data-ui-bar="normal"] #dock { box-shadow:inset 0 1px 0 color-mix(in srgb,var(--border) 70%,transparent) }
 @media(min-width:700px) { #mini-player:active { transform:none } }#mini-player.expanded .mini-line { opacity:0 }
 .mini-line { transition:opacity .2s ease }
+
+
+/* Only the background surface and shared cover scale; typography stays at native size. */
+.player-surface {position:absolute;inset:0;background:var(--bg);overflow:hidden;transform-origin:0 0;contain:strict;will-change:transform;}
+#app[data-monet="true"] #navigation {--nav-selected:var(--primary);}
+#navigation {touch-action:none;}
+.nav-pill {scale:calc(1 + var(--nav-press,0) * .035) calc(1 + var(--nav-press,0) * .04);}
+#app[data-ui-bar="floating"] .nav-pill {top:4px;bottom:4px;}
+#app[data-ui-bar="floating"] .nav-item {min-height:56px;}
+#app[data-ui-bar="normal"] .nav-item {min-height:52px;}
+#app[data-ui-bar="normal"] #dock {background:var(--card);}
+@media(min-width:700px){#dock {left:110px;}#app[data-ui-bar="floating"] #navigation {width:86px;margin:0;}}

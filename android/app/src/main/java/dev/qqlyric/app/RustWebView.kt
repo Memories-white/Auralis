@@ -78,6 +78,23 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
     private var ready=false
     private var closed=false
     private var requestedPlayer=false
+    private var savedRefreshRate:Float?=null
+    private fun animationRate(active:Boolean){
+        if(Build.VERSION.SDK_INT>=35)setRequestedFrameRate(if(active)android.view.View.REQUESTED_FRAME_RATE_CATEGORY_HIGH else android.view.View.REQUESTED_FRAME_RATE_CATEGORY_DEFAULT)
+        if(active&&savedRefreshRate==null){
+            val attributes=activity.window.attributes
+            savedRefreshRate=attributes.preferredRefreshRate
+            @Suppress("DEPRECATION") val screen=if(Build.VERSION.SDK_INT>=30)activity.display else activity.windowManager.defaultDisplay
+            val mode=screen?.mode
+            val powerSave=(activity.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager).isPowerSaveMode
+            val rate=if(powerSave)60f else screen?.supportedModes?.filter{it.physicalWidth==mode?.physicalWidth&&it.physicalHeight==mode?.physicalHeight}?.maxOfOrNull{it.refreshRate}?:60f
+            attributes.preferredRefreshRate=rate
+            activity.window.attributes=attributes
+        }else if(!active){
+            savedRefreshRate?.let{rate->val attributes=activity.window.attributes;attributes.preferredRefreshRate=rate;activity.window.attributes=attributes}
+            savedRefreshRate=null
+        }
+    }
     private var contentKeys:List<Any?>?=null
     private var lastPulse=""
     @Volatile private var cacheBytes=0L
@@ -106,7 +123,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
         loadUrl("https://auralis.local/index.html")
     }
     fun openPlayer(){requestedPlayer=true;if(ready){send("open_player",JSONObject());requestedPlayer=false}}
-    fun close(){closed=true;worker.shutdownNow();removeJavascriptInterface("AuralisNative");stopLoading();destroy()}
+    fun close(){animationRate(false);closed=true;worker.shutdownNow();removeJavascriptInterface("AuralisNative");stopLoading();destroy()}
     private fun empty()=WebResourceResponse("text/plain","UTF-8",404,"Not Found",mapOf("Cache-Control" to "no-store"),ByteArrayInputStream(ByteArray(0)))
     private fun resource(uri:Uri):WebResourceResponse{
         if(uri.scheme!="https"||uri.host!="auralis.local")return empty()
@@ -197,7 +214,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
     private fun handle(event:JSONObject){
         val m=music
         when(event.optString("type")){
-            "animation_rate"->if(Build.VERSION.SDK_INT>=35)setRequestedFrameRate(if(event.optBoolean("active"))android.view.View.REQUESTED_FRAME_RATE_CATEGORY_HIGH else android.view.View.REQUESTED_FRAME_RATE_CATEGORY_DEFAULT)
+            "animation_rate"->animationRate(event.optBoolean("active"))
             "ready"->{ready=true;contentKeys=null;lastPulse="";publish()}
             "navigate"->{val page=event.optString("page");if(page in setOf("home","mine","search")+SETTINGS_ROUTES)m.navigate(page)}
             "back"->m.back()

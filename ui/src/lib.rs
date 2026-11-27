@@ -25,6 +25,26 @@ struct CoverMorph {
     radius_to: f64,
 }
 
+#[derive(Clone)]
+struct SheetLayers {
+    player: Element,
+    surface: Element,
+    content: Element,
+    cover: Element,
+    artwork: Element,
+    mini: Element,
+    nav: Element,
+    overlay: Option<Element>,
+    width: f64,
+    height: f64,
+}
+#[derive(Clone, Copy)]
+struct NavDrag {
+    left: f64,
+    slot: f64,
+    start: f64,
+    moved: bool,
+}
 #[derive(Default)]
 struct App {
     data: Value,
@@ -59,12 +79,18 @@ struct App {
     mini_written: f64,
     mini: motion::Spring,
     dock: motion::Spring,
+    nav_press: motion::Spring,
+    nav_drag: Option<NavDrag>,
+    nav_element: Option<Element>,
+    nav_nodes: Vec<Element>,
     dock_ready: bool,
     dock_page: String,
     dock_count: usize,
     written_dock: f64,
     sheet_spring: motion::Spring,
     morph: Option<CoverMorph>,
+    sheet_layers: Option<SheetLayers>,
+    lyrics_mounted: bool,
     sheet_bounds: [f64; 4],
     last_frame: f64,
     mini_until: f64,
@@ -273,6 +299,30 @@ pub fn start() -> Result<(), JsValue> {
                 event.client_y() as f64,
                 zone.into(),
             ));
+            if let Some(nav) = element
+                .as_ref()
+                .and_then(|e| e.closest("#navigation").ok().flatten())
+            {
+                if viewport().0 >= 700.0 {
+                    return;
+                }
+                let bounds = rect(&nav);
+                let inset = match customization::get(&app.data, "bar") {
+                    "floating" => 4.0,
+                    "normal" => 10.0,
+                    _ => 8.0,
+                };
+                let slot = ((nav.client_width() as f64 - 2.0 * inset)
+                    / app.dock_count.max(1) as f64)
+                    .max(1.0);
+                app.nav_drag = Some(NavDrag {
+                    left: bounds[0] + inset,
+                    slot,
+                    start: event.client_x() as f64,
+                    moved: false,
+                });
+                app.nav_press.to(1.0);
+            }
             if element
                 .and_then(|e| e.closest("#lyric-viewport").ok().flatten())
                 .is_some()
@@ -283,9 +333,36 @@ pub fn start() -> Result<(), JsValue> {
     });
     document.add_event_listener_with_callback("pointerdown", down.as_ref().unchecked_ref())?;
     down.forget();
+    let nav_move = Closure::<dyn FnMut(PointerEvent)>::new(|event: PointerEvent| {
+        APP.with(|state| {
+            let mut app = state.borrow_mut();
+            if let Some(mut drag) = app.nav_drag {
+                if (event.client_x() as f64 - drag.start).abs() > 4.0 || drag.moved {
+                    drag.moved = true;
+                    app.nav_drag = Some(drag);
+                    let index = ((event.client_x() as f64 - drag.left) / drag.slot - 0.5)
+                        .clamp(0.0, app.dock_count.saturating_sub(1) as f64);
+                    app.dock.place(index);
+                    app.dock.to(index);
+                    app.paint_dock();
+                }
+            }
+        });
+    });
+    document.add_event_listener_with_callback("pointermove", nav_move.as_ref().unchecked_ref())?;
+    nav_move.forget();
     let up = Closure::<dyn FnMut(PointerEvent)>::new(|event: PointerEvent| {
         APP.with(|state| {
             let mut app = state.borrow_mut();
+            if let Some(drag) = app.nav_drag.take() {
+                app.nav_press.to(0.0);
+                if drag.moved {
+                    let index = app.dock.position.round().clamp(0.0, 2.0) as usize;
+                    app.dock.to(index as f64);
+                    app.suppress_click = now() + 350.0;
+                    app.act(&format!("navigate:{}", ["home", "mine", "settings"][index]));
+                }
+            }
             if let Some((x, y, zone)) = app.pointer.take() {
                 let dx = event.client_x() as f64 - x;
                 let dy = event.client_y() as f64 - y;
@@ -307,6 +384,11 @@ pub fn start() -> Result<(), JsValue> {
         APP.with(|s| {
             let mut app = s.borrow_mut();
             app.pointer = None;
+            if app.nav_drag.take().is_some() {
+                app.nav_press.to(0.0);
+                let index = app.dock_index();
+                app.dock.to(index as f64);
+            }
             if app.browse_until.is_infinite() {
                 app.browse_until = now() + 1800.0;
             }
@@ -330,6 +412,24 @@ pub fn start() -> Result<(), JsValue> {
         true,
     )?;
     scroll.forget();
+    let resize = Closure::<dyn FnMut(Event)>::new(|_: Event| {
+        APP.with(|state| {
+            let mut app = state.borrow_mut();
+            app.sync_dock();
+            app.fit_cover();
+            app.unmount_morph();
+            let target = if app.player { 1.0 } else { 0.0 };
+            app.sheet_spring.place(target);
+            app.sheet_spring.to(target);
+            app.cache_sheet_layers();
+            app.apply_sheet(target);
+            app.lyric_dirty = true;
+        });
+    });
+    web_sys::window()
+        .unwrap()
+        .add_event_listener_with_callback("resize", resize.as_ref().unchecked_ref())?;
+    resize.forget();
     install_animation();
     Ok(())
 }
@@ -744,7 +844,6 @@ impl App {
                 .as_array()
                 .map(|items| items.len())
                 .unwrap_or(0);
-            self.sync_dock();
             if let Some(main) = el("content").and_then(|e| e.dyn_into::<HtmlElement>().ok()) {
                 let _ = main.style().set_property("scroll-behavior", "auto");
                 main.set_scroll_top(*self.scrolls.get(&self.route_key()).unwrap_or(&0));
@@ -801,7 +900,16 @@ impl App {
             );
             class(&root, "reduced-motion", self.reduced);
             let _ = root.set_attribute("data-route", s(&self.data, "page"));
+            let _ = root.set_attribute(
+                "data-monet",
+                if b(&self.data, "monet") {
+                    "true"
+                } else {
+                    "false"
+                },
+            );
         }
+        self.sync_dock();
         self.paint_mini();
         self.paint_progress();
         self.scrolled();
@@ -836,8 +944,25 @@ impl App {
                 &self.lines,
                 &self.translations,
                 &self.word_lines,
+                self.player_page == 2,
             ),
         );
+        self.lyrics_mounted = self.player_page == 2;
+        self.cache_lyric_nodes();
+        self.lyric_dirty = true;
+        self.active_line = None;
+        if let Some(viewport) = el("lyric-viewport").and_then(|e| e.dyn_into::<HtmlElement>().ok())
+        {
+            viewport.set_scroll_top(old_scroll);
+        }
+        self.show_player_page();
+        self.cache_sheet_layers();
+        self.apply_sheet(self.sheet_spring.position);
+        self.paint_progress();
+        self.sync_lyrics();
+    }
+
+    fn cache_lyric_nodes(&mut self) {
         self.lyric_viewport = el("lyric-viewport").and_then(|e| e.dyn_into().ok());
         self.word_nodes = self
             .word_lines
@@ -861,17 +986,42 @@ impl App {
         self.lyric_nodes = (0..self.lines.len())
             .filter_map(|i| el(&format!("lyric-{i}")).and_then(|e| e.dyn_into().ok()))
             .collect();
-        self.lyric_dirty = true;
-        self.active_line = None;
-        if let Some(viewport) = el("lyric-viewport").and_then(|e| e.dyn_into::<HtmlElement>().ok())
-        {
-            viewport.set_scroll_top(old_scroll);
+    }
+    fn ensure_lyrics(&mut self) {
+        if self.player_page != 2 || self.lyrics_mounted {
+            return;
         }
-        self.show_player_page();
-        self.paint_progress();
+        set_html(
+            "lyric-lines",
+            &render::lyrics(&self.lines, &self.translations, &self.word_lines),
+        );
+        self.lyrics_mounted = true;
+        self.cache_lyric_nodes();
+        self.active_line = None;
+        self.lyric_dirty = true;
         self.sync_lyrics();
     }
-
+    fn cache_sheet_layers(&mut self) {
+        let (width, height) = viewport();
+        self.sheet_layers = (|| {
+            Some(SheetLayers {
+                player: el("player")?,
+                surface: el("player-surface")?,
+                content: find("#player .player-safe")?,
+                cover: el("cover-art")?,
+                artwork: if self.player_page == 2 {
+                    find("#player .identity-art")?
+                } else {
+                    el("cover-art")?
+                },
+                mini: el("mini-player")?,
+                nav: el("navigation")?,
+                overlay: el("shared-artwork"),
+                width,
+                height,
+            })
+        })();
+    }
     /// Route → dock slot. Settings sub-pages keep the settings slot selected so the
     /// indicator does not shuttle while the user walks deeper into a group.
     fn dock_index(&self) -> usize {
@@ -920,10 +1070,39 @@ impl App {
             self.dock.to(index);
         }
         self.dock_page = slot;
+        if let Some(nav) = el("navigation") {
+            self.nav_nodes = nav
+                .query_selector_all(".nav-item")
+                .ok()
+                .map(|nodes| {
+                    (0..nodes.length())
+                        .filter_map(|i| nodes.item(i)?.dyn_into().ok())
+                        .collect()
+                })
+                .unwrap_or_default();
+            self.nav_element = Some(nav.clone());
+            let inset = match customization::get(&self.data, "bar") {
+                "floating" => 4.0,
+                "normal" => 10.0,
+                _ => 8.0,
+            };
+            let width = nav
+                .dyn_ref::<HtmlElement>()
+                .map(|n| n.client_width() as f64)
+                .unwrap_or(0.0);
+            style(
+                &nav,
+                "--nav-slot",
+                &format!(
+                    "{}px",
+                    ((width - 2.0 * inset) / self.dock_count.max(1) as f64).max(0.0)
+                ),
+            );
+        }
         self.paint_dock();
     }
     fn paint_dock(&mut self) {
-        if let Some(nav) = el("navigation") {
+        if let Some(nav) = self.nav_element.as_ref() {
             self.written_dock = self.dock.position;
             style(&nav, "--nav-index", &format!("{:.5}", self.dock.position));
             style(&nav, "--nav-count", &format!("{}", self.dock_count.max(1)));
@@ -931,28 +1110,41 @@ impl App {
             // reads as weight rather than a bounce past the slot.
             let wobble = (self.dock.position - self.dock.position.round()).abs();
             style(&nav, "--nav-wobble", &format!("{wobble:.4}"));
+            style(
+                &nav,
+                "--nav-press",
+                &format!("{:.4}", self.nav_press.position),
+            );
         }
-        let count = self.dock_count.max(1);
-        for index in 0..count {
-            if let Ok(Some(item)) =
-                doc().query_selector(&format!("#navigation .nav-item:nth-of-type({})", index + 1))
-            {
-                let distance = (index as f64 - self.dock.position).abs();
-                let proximity = (1.0 - distance).clamp(0.0, 1.0);
-                style(&item, "--nav-p", &format!("{proximity:.4}"));
-            }
+        for (index, item) in self.nav_nodes.iter().enumerate() {
+            let distance = (index as f64 - self.dock.position).abs();
+            let proximity = (1.0 - distance).clamp(0.0, 1.0);
+            style(&item, "--nav-p", &format!("{proximity:.4}"));
         }
     }
     fn advance_dock(&mut self, dt: f64) {
-        if self.dock.settled() {
+        if self.dock.settled() && self.nav_press.settled() {
+            return;
+        }
+        if self.reduced {
+            self.dock.place(self.dock.target);
+            self.nav_press.place(self.nav_press.target);
+            self.paint_dock();
             return;
         }
         let position = self.dock.sample(dt, motion::Feel::DOCK);
-        if (position - self.written_dock).abs() > 0.0002 {
+        self.nav_press.sample(dt, motion::Feel::REVEAL);
+        if (position - self.written_dock).abs() > 0.0002
+            || !self.nav_press.settled()
+            || self.nav_press.position == 0.0
+        {
             self.paint_dock();
         }
     }
     fn advance_mini(&mut self, time: f64, dt: f64) {
+        if self.player || !self.sheet_spring.settled() {
+            return;
+        }
         let target = if !self.player
             && self.mini_until > time
             && customization::get(&self.data, "compact") != "on"
@@ -981,6 +1173,7 @@ impl App {
         }
     }
     fn show_player_page(&mut self) {
+        self.ensure_lyrics();
         self.fit_cover();
         if let Some(pages) = el("player-pages") {
             style(&pages, "--page", &self.player_page.to_string());
@@ -1013,7 +1206,11 @@ impl App {
     fn measure_morph(&mut self) -> Option<CoverMorph> {
         let mini = el("mini-player")?;
         let mini_art = mini.query_selector(".mini-art").ok().flatten()?;
-        let cover = el("cover-art")?;
+        let cover = if self.player_page == 2 {
+            find("#player .identity-art")?
+        } else {
+            el("cover-art")?
+        };
         let from = rect(&mini_art);
         let to = rect(&cover);
         self.sheet_bounds = rect(&mini);
@@ -1040,8 +1237,15 @@ impl App {
             return;
         };
         overlay.set_id("shared-artwork");
+        if let Some(morph) = self.morph {
+            style(&overlay, "width", &format!("{}px", morph.to[2]));
+            style(&overlay, "height", &format!("{}px", morph.to[3]));
+        }
         if let Ok(copy) = mini_art.clone_node_with_deep(true) {
             let _ = overlay.append_child(&copy);
+            if let Some(inner) = overlay.first_element_child() {
+                style(&inner, "border-radius", "0");
+            }
         }
         if let Some(root) = el("app") {
             let _ = root.append_child(&overlay);
@@ -1052,14 +1256,36 @@ impl App {
             overlay.remove();
         }
         self.morph = None;
+        if let Some(layers) = self.sheet_layers.as_mut() {
+            layers.overlay = None;
+        }
     }
     fn begin_sheet(&mut self, open: bool) {
         self.player = open;
+        if !self.reduced && !self.sheet_spring.settled() && self.morph.is_some() {
+            self.sheet_spring.to(if open { 1.0 } else { 0.0 });
+            return;
+        }
+        if let Some(content) = find("#player .player-safe") {
+            style(&content, "transform", "none");
+        }
+        if !open {
+            self.mini_until = 0.0;
+            self.mini.place(0.0);
+            self.mini.to(0.0);
+            self.mini_written = 0.0;
+            self.mini_expanded = false;
+            if let Some(mini) = el("mini-player") {
+                style(&mini, "--mini", "0");
+                class(&mini, "expanded", false);
+            }
+        }
         self.morph = if self.reduced {
             None
         } else {
             self.measure_morph()
         };
+        self.cache_sheet_layers();
         if self.reduced {
             let target = if open { 1.0 } else { 0.0 };
             self.sheet_spring.place(target);
@@ -1072,6 +1298,9 @@ impl App {
         }
         if self.morph.is_some() {
             self.mount_morph();
+            if let Some(layers) = self.sheet_layers.as_mut() {
+                layers.overlay = el("shared-artwork");
+            }
         }
         self.sheet_spring.to(if open { 1.0 } else { 0.0 });
         // Paint the first morph frame now so no unstyled overlay is ever shown.
@@ -1079,6 +1308,18 @@ impl App {
     }
     fn open_player(&mut self) {
         if self.player {
+            return;
+        }
+        self.animation_vote = true;
+        post(json!({"type":"animation_rate","active":true}));
+        if !self.reduced && !self.sheet_spring.settled() && self.morph.is_some() {
+            self.player = true;
+            self.sheet_spring.to(1.0);
+            if let Some(player) = el("player") {
+                class(&player, "visible", true);
+                let _ = player.set_attribute("aria-hidden", "false");
+                let _ = player.remove_attribute("inert");
+            }
             return;
         }
         self.player_page = 1;
@@ -1108,43 +1349,61 @@ impl App {
     /// a continuous morph where the shared cover's corner radius is interpolated in
     /// screen pixels instead of being switched by a class at the end.
     fn apply_sheet(&mut self, p: f64) {
-        let (width, height) = viewport();
-        let [x, y, mw, mh] = self.sheet_bounds;
+        let Some(layers) = self.sheet_layers.clone() else {
+            return;
+        };
+        let p = p.clamp(0.0, 1.0);
         let q = 1.0 - p;
-        if let Some(player) = el("player") {
-            // The card radius shrinks with the clip inset so the sheet starts exactly
-            // on the mini player's rounded rectangle.
-            let radius = 30.0 * q * q;
-            style(
-                &player,
-                "clip-path",
-                &format!(
-                    "inset({}px {}px {}px {}px round {}px)",
-                    y * q,
-                    (width - x - mw).max(0.0) * q,
-                    (height - y - mh).max(0.0) * q,
-                    x * q,
-                    radius
-                ),
-            );
-            style(&player, "--sheet-alpha", if p > 0.0005 { "1" } else { "0" });
-            style(
-                &player,
-                "--sheet-content",
-                &motion::ease_out((p - 0.12) / 0.62).to_string(),
-            );
-        }
+        let [x, y, mw, mh] = self.sheet_bounds;
+        let sx = (mw + (layers.width - mw) * p) / layers.width.max(1.0);
+        let sy = (mh + (layers.height - mh) * p) / layers.height.max(1.0);
+        style(
+            &layers.surface,
+            "transform",
+            &format!(
+                "translate3d({:.3}px,{:.3}px,0) scale({:.6},{:.6})",
+                x * q,
+                y * q,
+                sx,
+                sy
+            ),
+        );
+        let r = 26.0 * q * q;
+        style(
+            &layers.surface,
+            "border-radius",
+            &format!("{}px / {}px", r / sx.max(0.001), r / sy.max(0.001)),
+        );
+        style(
+            &layers.surface,
+            "opacity",
+            if p > 0.0005 { "1" } else { "0" },
+        );
+        style(
+            &layers.content,
+            "opacity",
+            &motion::ease_out((p - 0.25) / 0.65).to_string(),
+        );
+        style(
+            &layers.content,
+            "transform",
+            &format!("translate3d(0,{:.3}px,0)", 18.0 * q),
+        );
+        style(&layers.mini, "opacity", &q.to_string());
+        style(&layers.nav, "opacity", &q.to_string());
+        style(
+            &layers.nav,
+            "transform",
+            &format!("translate3d(0,{}px,0)", 72.0 * p),
+        );
         if p <= 0.0005 && !self.player {
-            if let Some(player) = el("player") {
-                class(&player, "mounted", false);
-            }
+            class(&layers.player, "mounted", false);
         }
         let Some(morph) = self.morph else {
             // Reduced motion (or an unmeasurable layout) skips the shared morph but
             // must still reveal the real cover and unmount the closed sheet.
-            if let Some(player) = el("player") {
-                style(&player, "--cover-opacity", "1");
-            }
+            style(&layers.cover, "opacity", "1");
+            style(&layers.artwork, "opacity", "1");
             return;
         };
         let done = if self.player {
@@ -1152,9 +1411,8 @@ impl App {
         } else {
             p <= 0.0005
         };
-        if let Some(player) = el("player") {
-            style(&player, "--cover-opacity", if done { "1" } else { "0" });
-        }
+        style(&layers.cover, "opacity", if done { "1" } else { "0" });
+        style(&layers.artwork, "opacity", if done { "1" } else { "0" });
         if done {
             self.unmount_morph();
             return;
@@ -1168,9 +1426,7 @@ impl App {
         // The overlay is scaled from a fixed box, so the CSS radius is divided by the
         // scale to keep the *rendered* radius exactly on the interpolated value.
         let radius = motion::lerp(morph.radius_from, morph.radius_to, geometry) / scale;
-        if let Some(overlay) = el("shared-artwork") {
-            style(&overlay, "width", &format!("{:.2}px", morph.to[2]));
-            style(&overlay, "height", &format!("{:.2}px", morph.to[3]));
+        if let Some(overlay) = layers.overlay {
             style(
                 &overlay,
                 "transform",
@@ -1178,10 +1434,6 @@ impl App {
             );
             style(&overlay, "border-radius", &format!("{radius:.2}px"));
             style(&overlay, "opacity", "1");
-            if let Some(inner) = overlay.first_element_child() {
-                // The cloned artwork would otherwise keep its own 12px radius scaled.
-                style(&inner, "border-radius", "0");
-            }
         }
         if p <= 0.0005 && !self.player {
             if let Some(player) = el("player") {
@@ -1410,7 +1662,10 @@ impl App {
         let animating = !self.dock.settled()
             || !self.mini.settled()
             || !self.sheet_spring.settled()
-            || self.morph.is_some();
+            || self.morph.is_some()
+            || !self.nav_press.settled()
+            || self.nav_drag.is_some()
+            || (self.player && self.player_page == 2 && b(&self.live, "playing"));
         if animating != self.animation_vote {
             self.animation_vote = animating;
             post(json!({"type":"animation_rate","active":animating}));

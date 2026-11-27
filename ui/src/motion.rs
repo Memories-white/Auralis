@@ -35,7 +35,7 @@ impl Feel {
     /// Heavier motion for the player sheet, whose artwork morph must not wobble.
     pub const SHEET: Feel = Feel {
         stiffness: 19.0,
-        damping: 0.92,
+        damping: 1.0,
     };
     /// Short reveal used when a control group expands.
     pub const REVEAL: Feel = Feel {

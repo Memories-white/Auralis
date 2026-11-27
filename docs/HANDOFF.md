@@ -6,17 +6,40 @@
 
 | 项目 | 状态 / 入口 |
 | :-- | :-- |
-| 日期、版本 | 2026-11-27 · `0.5.3-preview` · versionCode `30` |
-| 基线 | `b8c380b` · 0.5.2分支整合版 |
+| 日期、版本 | 2026-11-27 · `0.5.4-preview` · versionCode `31` |
+| 基线 | `28e7f5d04cf593215a6cc54d8209177f12452bc9` · 已推送的0.5.3逐词歌词版；本轮开始本地与远程main一致 |
 | 当前提交 | 本文与本次实现同一个提交；使用 `git log -1` 获取完整 SHA，避免文档自引用哈希 |
-| 最新本地包 | `APKs/Auralis-v0.5.3-preview.apk` |
-| APK SHA256 | `363A81CF16040E71CEE8C91531F3E4125A5670D72DA5AB404C8A6CC3B598F9C1` |
-| 包体 | 17295846 字节；`apksigner verify` 通过（debug 证书） |
+| 最新本地包 | `APKs/Auralis-v0.5.4-preview.apk` |
+| APK SHA256 | `67DECF2881D9DB5248D938D95348332353BD8127E5CD1EB8CD30B3B36F8F79F4` |
+| 包体 | 16118271 字节；`apksigner verify` v2通过（debug 证书） |
 | 仓库 | [Memories-white/Auralis](https://github.com/Memories-white/Auralis) · public |
 | 已发布版本 | GitHub Release 与主分支分开管理；本次不自动创建 Release |
 | 当前界面架构 | Rust/WASM + Android WebView；不要恢复 Kotlin 页面或增加 JS 动画控制器 |
 
 ## 本次改动交接表
+
+| 问题 / 需求 | 实现与入口 | 验证 / 边界 / 下一步 |
+| :-- | :-- | :-- |
+| 底栏与Melox仍不一致 | 研究Melox当前提交 `bfe7c5dc467b84d7a9df8e63c93208a3e6f61672`；`ui/src/style.css` 玻璃歌曲栏52、导航54、水平16、间隔8、底边max(24,safe+8)，胶囊每侧越过槽位5，图标25/标签11；莫奈关闭用中性前景，开启用主题色 | WASM实测52/54；普通68/64、悬浮64/64且导航宽308，明暗截图复核；Rust独立实现，不复制GPL布局源码。WebView磨砂仍不具备Melox原生液态折射 |
+| 底栏缺少跟手反馈 | `lib.rs` 的 `NavDrag`、pointerdown/move/up/cancel、`sync_dock/paint_dock/advance_dock`：按压弹簧、拖动定位、松手导航、取消归位，缓存DOM与槽位宽度；宽屏侧栏保持点击操作 | 真实WASM指针拖到0.6槽时指示器位于0.6，松手请求mine；弹簧微量过冲有上限；resize重算槽位 |
+| 展开歌曲栏卡顿 | `SheetLayers` 缓存节点；`apply_sheet` 独立背景surface、内容与共享封面层，移除全屏clip-path与根节点继承的逐帧变量；overlay尺寸只在创建时设置，逐帧改transform/opacity/圆角；打开期间暂停背后mini高度运动 | 封面圆角连续并正确交接；关闭中重新打开复用同一overlay与位置；`motion.rs::SHEET` 使用19rad/s临界阻尼；未宣称完全无重绘或稳定120FPS |
+| 打开封面页生成整首歌词DOM | `render.rs::lyrics/player` 与 `lib.rs::ensure_lyrics/cache_lyric_nodes`：封面页不挂载词行，首次进入歌词页才创建，保留逐词节点缓存与真实时间 | 400行夹具打开封面时词行节点400→0；首次进入歌词页正确创建，原暂停/seek/帧间逐词进度回归通过 |
+| 高刷新率提示与生命周期 | `RustWebView.kt::animationRate`：动画/播放中歌词时申请API35 View高刷新类别及同分辨率最高窗口刷新率；省电模式请求60；结束或close恢复窗口旧值 | Kotlin/Android编译通过；只改应用窗口提示，系统/WebView/设备策略可覆盖；实机需观察实际呈现帧与停止后的恢复 |
+| 更新交付状态 | versionCode31 / 0.5.4；本地APK与源码分开管理 | 完整离线构建、签名通过；交付推送main，不创建Release；用户要求手机后续连接再通知，本轮不安装、不声称手机已顺滑 |
+
+## 0.5.4 验证表
+
+| 检查 | 结果 / 证据 |
+| :-- | :-- |
+| 单元与策略 | Rust UI27、core40、Java4组通过；60/120Hz相同弹簧轨迹、反向保留速度、轻微过冲约束继续通过；歌词运动另覆盖多帧率 |
+| 实际WASM回归 | `tools/check-rust-ui.cjs` 通过：尺寸、胶囊跟手、共享封面连续圆角/交接、关闭中反向、封面页不生成歌词、首次挂载、五次真实触屏切页、歌词跟随恢复、逐词进度、700首分页、二维码、设置、封面复用、窄/宽屏 |
+| 性能方法 | 新增 `tools/check-player-motion.cjs`；411×914 Chromium实际WASM，自写400行歌词、暂停曲目，从点击到约1.1秒后读取CDP CPU指标。浏览器回调与CPU并非Android GPU呈现帧，单次样本不是统计基准 |
+| 前后CPU样本 | 基线28e7f5d / 本轮：LayoutDuration 12.840→9.681ms，RecalcStyleDuration 21.141→7.709ms，TaskDuration 68.776→46.161ms；RecalcStyleCount 63→41。桌面回调p95均约16.8ms，没有据此声称手机提高到某个帧率 |
+| 性能与截图证据 | 本地忽略目录 `device-debug/rust-ui/motion/{baseline,after}.json`、`after-dock-{light,dark}.png`、`after-player.png`；浏览器完整回归在 `device-debug/rust-ui/browser/`；均为测试夹具，不上传个人内容 |
+| 样式检查 | frontend-design-styles 的lint_tokens.py：0 error / 0 warn；尺寸与截图另做检查，不能仅靠令牌lint证明还原完整 |
+| 实机下一步 | 用户通知USB连接后保留数据安装；比较展开/收起/快速反向、玻璃拖动、120Hz与省电模式、播放歌词与停止刷新提示恢复。原生液态折射仍未实现 |
+
+## 0.5.3 历史改动交接表
 
 | 问题 / 需求 | 实现与入口 | 验证 / 边界 |
 | :-- | :-- | :-- |

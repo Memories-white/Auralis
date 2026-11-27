@@ -100,7 +100,7 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     const bounds = await page.evaluate(() => ({ header: document.querySelector('#header').getBoundingClientRect().bottom, content: document.querySelector('#content').getBoundingClientRect().top, shelf: document.querySelector('.shelf-card').getBoundingClientRect().x }));
     assert.ok(bounds.content >= bounds.header - 1, 'Content overlaps header');
     assert.ok(bounds.shelf >= 20, 'Shelf snaps away its leading gutter');
-    await page.screenshot({ path: path.join(output, 'home-light.png') });
+    await page.waitForTimeout(450); await page.screenshot({ path: path.join(output, 'home-light.png') });
 
     // Dock indicator: the pill is Rust-sampled, so every reading must be a valid
     // intermediate slot position that ends exactly on the selected item.
@@ -118,10 +118,23 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
       return { index: parseFloat(getComputedStyle(nav).getPropertyValue('--nav-index')), dx: Math.abs(pill.x - item.x), dw: Math.abs(pill.width - item.width) };
     });
     assert.ok(dockTrack.some(v => v > 0.02 && v < 1.98), `Dock indicator jumped instead of gliding: ${dockTrack.join(',')}`);
-    assert.ok(dockTrack.every((v, i) => i === 0 || v >= dockTrack[i - 1] - 0.001), 'Dock indicator reversed direction');
+    assert.ok(dockTrack.every(v => v >= 0 && v < 1.045), 'Dock overshoot exceeded the spring tolerance: '+dockTrack);
     assert.ok(dockSettled.index > 0.999 && dockSettled.index < 1.001, `Dock indicator did not settle on slot 1: ${dockSettled.index}`);
-    assert.ok(dockSettled.dx < 2 && dockSettled.dw < 2, 'Dock indicator does not match the selected item');
+    assert.ok(Math.abs(dockSettled.dx-5)<2 && Math.abs(dockSettled.dw-10)<2, 'Glass indicator should overhang the selected slot by 5px per side: '+JSON.stringify(dockSettled));
     data.page = 'home'; await content(); await page.waitForTimeout(700);
+
+    const dockGeometry = await page.evaluate(() => ({mini:document.querySelector('#mini-player').getBoundingClientRect().height, nav:document.querySelector('#navigation').getBoundingClientRect().height}));
+    assert.deepEqual(dockGeometry, {mini:52,nav:54});
+    // Real pointer travel moves the capsule before committing a route on release.
+    const navBox = await page.locator('#navigation').boundingBox();
+    const navPoint = slot => ({clientX:navBox.x+8+(navBox.width-16)/3*(slot+.5),clientY:navBox.y+27,pointerId:19,pointerType:'touch',bubbles:true});
+    await page.locator('#navigation').dispatchEvent('pointerdown',navPoint(0));
+    await page.locator('#navigation').dispatchEvent('pointermove',navPoint(.6));
+    const dragIndex=await page.locator('#navigation').evaluate(e=>Number(e.style.getPropertyValue('--nav-index')));
+    assert.ok(dragIndex>.55&&dragIndex<.65, 'Capsule must track the finger: '+dragIndex);
+    await page.locator('#navigation').dispatchEvent('pointerup',navPoint(.6));
+    assert.equal(await page.evaluate(()=>window.__actions.filter(a=>a.type==='navigate').at(-1).page),'mine');
+    data.page='mine'; await content(); data.page='home'; await content(); await page.waitForTimeout(700);
 
     // Cover morph: the shared element must interpolate the corner radius instead of
     // switching classes at the end, and the real cover only appears once it lands.
@@ -141,6 +154,8 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
       await page.waitForTimeout(26);
     }
     await page.waitForTimeout(750);
+    assert.equal(await page.locator('.lyric-line').count(),0,'Cover page eagerly mounted the lyric document');
+    assert.equal(await page.locator('#player').evaluate(e=>getComputedStyle(e).clipPath),'none');
     const landed = await page.evaluate(() => ({
       overlay: !!document.querySelector('#shared-artwork'),
       radius: getComputedStyle(document.querySelector('#cover-art')).borderRadius,
@@ -155,6 +170,17 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     const opened = await page.locator('#player').boundingBox();
     assert.ok(Math.abs(opened.y) < 1 && Math.abs(opened.width - 411) < 1, 'Player did not expand to window');
     await page.screenshot({ path: path.join(output, 'player-light.png') });
+    const reversal=await page.evaluate(async()=>{
+      document.querySelector('[data-action=close_player]').click();
+      await new Promise(resolve=>setTimeout(resolve,85));
+      const overlay=document.querySelector('#shared-artwork');
+      const before=overlay?.style.transform;
+      auralisUpdate(JSON.stringify({type:'open_player'}));
+      return {exists:!!overlay,same:overlay===document.querySelector('#shared-artwork'),continuous:before===overlay?.style.transform};
+    });
+    assert.deepEqual(reversal,{exists:true,same:true,continuous:true},'Interrupted sheet must retain its layer and position');
+    await page.waitForTimeout(800);
+    assert.equal(await page.locator('#shared-artwork').count(),0);
     const touch = await page.context().newCDPSession(page);
     const swipeTo = async (direction, expected) => {
       const { x, y, width, height } = await page.locator('#player-pages').boundingBox();
@@ -171,6 +197,7 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
       assert.ok(await page.locator(`#page-dot-${expected}.selected`).count(), `Swipe ${direction} did not open player page ${expected}`);
     };
     await swipeTo('left', 2);
+    assert.equal(await page.locator('.lyric-line').count(),6,'Lyrics must mount on the first lyric-page visit');
     await swipeTo('right', 1);
     await swipeTo('right', 0);
     await swipeTo('left', 1);

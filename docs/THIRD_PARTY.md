@@ -13,6 +13,8 @@
 
 ## 依赖
 
+0.5.4 进一步研究 Melox 提交 `bfe7c5dc467b84d7a9df8e63c93208a3e6f61672` 的玻璃底栏、悬浮导航、歌曲栏尺寸和共享封面视觉行为，使用 Rust 状态/弹簧与 CSS 合成图层独立实现；未移植这些 GPL 文件源码。WebView 背景模糊不等同于 Melox 原生液态折射，性能测量也不代表其原生实现的帧率。
+
 0.5.3 的云端QRC解码器按 MIT 项目 [jixunmoe-go/qrc](https://github.com/jixunmoe-go/qrc) 固定提交 `866e996416b0cec7bef648400633f6483c4200d5` 移植到Rust，保留[许可](licenses/QRC-LICENSE)与[修改说明](licenses/QRC-NOTICE.md)。限长解压使用flate2及其Rust backend，依赖版本锁定在core/Cargo.lock。逐字UI和进度逻辑独立使用Rust/CSS实现。
 
 0.4.5 参考 Melodist 的 `MobileCoverCacheResolver.kt`、`AlbumArtImage.kt` 中缓存优先与避免重复淡入的设计。Auralis 的请求合并、Blob资源与DOM节点保留独立使用Rust实现；Android继续承担磁盘、字节响应与已有状态持久化桥接。
