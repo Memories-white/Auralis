@@ -42,6 +42,29 @@ impl Feel {
         stiffness: 30.0,
         damping: 0.88,
     };
+    pub const PAGER: Feel = Feel {
+        stiffness: 22.0,
+        damping: 1.0,
+    };
+}
+
+/// One handoff clock for the background, mini foreground and full-page controls.
+/// Thresholds follow the observed Melox composition; this is an independent
+/// Rust/WebView implementation, not a port of GPL rendering code.
+pub struct SheetBlend {
+    pub background: f64,
+    pub mini: f64,
+    pub content: f64,
+    pub mini_above: bool,
+}
+pub fn sheet_blend(progress: f64) -> SheetBlend {
+    let p = progress.clamp(0.0, 1.0);
+    SheetBlend {
+        background: smooth(p / 0.2),
+        mini: 1.0 - smooth(p / 0.3),
+        content: ease_out((p - 0.1) / 0.5),
+        mini_above: p > 0.0 && p < 0.3,
+    }
 }
 
 impl Spring {
@@ -86,7 +109,9 @@ impl Spring {
             let b = (v0 + zeta * omega * x0) / damped;
             (
                 decay * (a * cos + b * sin),
-                decay * ((b * damped - zeta * omega * a) * cos - (a * damped + zeta * omega * b) * sin),
+                decay
+                    * ((b * damped - zeta * omega * a) * cos
+                        - (a * damped + zeta * omega * b) * sin),
             )
         };
         self.position = self.target + x;
@@ -120,15 +145,38 @@ pub fn length(value: &str, relative: f64) -> f64 {
     if let Some(percent) = value.strip_suffix('%') {
         return percent.parse::<f64>().unwrap_or(0.0) / 100.0 * relative;
     }
-    value
-        .trim_end_matches("px")
-        .parse::<f64>()
-        .unwrap_or(0.0)
+    value.trim_end_matches("px").parse::<f64>().unwrap_or(0.0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn return_hands_off_foreground_before_the_surface_lands() {
+        let end = sheet_blend(0.0);
+        assert_eq!((end.background, end.mini, end.content), (0.0, 1.0, 0.0));
+        let tail = sheet_blend(0.1);
+        assert!(
+            tail.mini > 0.7 && tail.background <= 0.5 && tail.content == 0.0 && tail.mini_above
+        );
+        let full = sheet_blend(1.0);
+        assert_eq!((full.background, full.mini, full.content), (1.0, 0.0, 1.0));
+        for hz in [60, 90, 120, 144] {
+            let mut s = Spring::default();
+            s.place(1.0);
+            s.to(0.0);
+            let mut visible = 0;
+            for _ in 0..hz {
+                let p = s.sample(1.0 / hz as f64, Feel::SHEET);
+                let b = sheet_blend(p);
+                if p < 0.12 && p > 0.02 {
+                    assert!(b.mini > 0.6 && b.background < 0.7);
+                    visible += 1;
+                }
+            }
+            assert!(visible > 0);
+        }
+    }
 
     fn run(hz: u32, feel: Feel, seconds: f64) -> Vec<f64> {
         let mut spring = Spring::default();

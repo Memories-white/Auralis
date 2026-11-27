@@ -1021,7 +1021,8 @@ h1 {
   width:300%;
   display:flex;
   transform:translateX(calc(var(--page) * -33.333333%));
-  transition:transform .5s cubic-bezier(.22,1,.36,1)
+  transition:none;
+  will-change:transform
 }
 .player-strip>div {
   width:33.333333%;
@@ -1780,6 +1781,7 @@ h1 {
 .mini-compact .icon-button {width:40px;height:44px;flex-basis:40px;}
 .mini-compact svg {width:25px;height:25px;}
 .mini-line {display:none;}
+#mini-player.sharing-artwork .mini-art {visibility:hidden;}
 .mini-expanded {top:76px;bottom:10px;left:18px;right:18px;justify-content:space-between;gap:0;}
 .mini-five {display:flex;align-items:center;justify-content:space-between;min-height:56px;gap:4px;}
 .mini-five .icon-button {width:44px;height:48px;flex-basis:44px;}

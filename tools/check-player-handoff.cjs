@@ -1,0 +1,60 @@
+// Regression for the user's return/reopen recording. Real WASM; no phone FPS claim.
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const root=path.resolve(__dirname,'..'),assets=path.join(root,'android/app/src/main/assets/ui');
+const output=path.join(root,'device-debug/rust-ui/handoff');fs.mkdirSync(output,{recursive:true});
+const song={mid:'handoff-fixture',title:'A quiet return',artist:'Auralis study',coverUrl:'https://example.invalid/cover',duration:180};
+const data={page:'home',currentSong:song,queue:[song],likes:[],recent:[],tracks:[],discovery:[],recommendations:[],playlists:[],history:[],artists:[],counts:{},safeTop:24,safeBottom:16,uiPreferences:{},lyrics:'[00:00.000]Stay in the light\n[00:05.000]A quiet return',translation:'',wordLyrics:'[]',lyricState:'ready',colors:{bg:'#141414',card:'#242424',fg:'#f2f2f2',muted:'#96979b',primary:'#91b6ff','on-primary':'#182c4b',border:'#3d3e42'}};
+const live={mid:song.mid,title:song.title,artist:song.artist,cover:song.coverUrl,playing:false,position:6000,duration:180000};
+(async()=>{const browser=await chromium.launch({headless:true});try{
+ const page=await browser.newPage({viewport:{width:411,height:914},isMobile:true,hasTouch:true});
+ await page.addInitScript(()=>{window.__actions=[];window.AuralisNative={postMessage:m=>window.__actions.push(JSON.parse(m))};});
+ await page.route('**/*',route=>{const u=new URL(route.request().url());if(u.hostname==='example.invalid'||u.pathname==='/artwork')return route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500"><path fill="#e5ddd0" d="M0 0h500v500H0z"/><path fill="#253c61" d="M0 300h500v200H0z"/></svg>'});const file=path.resolve(assets,'.'+u.pathname);assert.ok(file.startsWith(assets+path.sep));return route.fulfill({contentType:file.endsWith('.wasm')?'application/wasm':file.endsWith('.js')?'text/javascript':'text/html',body:fs.readFileSync(file)});});
+ await page.goto('https://auralis.local/index.html');await page.waitForFunction(()=>window.auralisUpdate);
+ const content=()=>page.evaluate(data=>auralisUpdate(JSON.stringify({type:'content',state:data})),data);
+ await content();await page.evaluate(live=>auralisUpdate(JSON.stringify({type:'playback',state:live})),live);
+ await page.waitForTimeout(300);await page.locator('#mini-player .mini-meta').click();await page.waitForTimeout(800);
+ const frames=await page.evaluate(async()=>{const frames=[];document.querySelector('[data-action=close_player]').click();const start=performance.now();await new Promise(resolve=>{function frame(){const surface=document.querySelector('#player-surface'),mini=document.querySelector('#mini-player'),nav=document.querySelector('#navigation');const box=surface.getBoundingClientRect(),m=mini.getBoundingClientRect();frames.push({time:performance.now()-start,p:(box.height-m.height)/(innerHeight-m.height),surface:Number(getComputedStyle(surface).opacity),mini:Number(getComputedStyle(mini).opacity),dockZ:Number(getComputedStyle(document.querySelector('#dock')).zIndex),playerZ:Number(getComputedStyle(document.querySelector('#player')).zIndex),nav:Number(getComputedStyle(nav).opacity),mounted:document.querySelector('#player').classList.contains('mounted')});if(performance.now()-start<900)requestAnimationFrame(frame);else resolve();}requestAnimationFrame(frame);});return frames;});
+ fs.writeFileSync(path.join(output,'return-frames.json'),JSON.stringify(frames,null,2));
+ const tail=frames.filter(f=>f.p>.02&&f.p<.12);assert.ok(tail.length>=2,'Return sampling missed the handoff');
+ assert.ok(tail.every(f=>f.surface<.7),'Shrunk full-player background still obscures the mini-player');
+ assert.ok(tail.every(f=>f.dockZ>f.playerZ&&f.mini>.2),'Mini-player foreground did not regain the top layer');
+ assert.equal(frames.at(-1).mounted,false);assert.equal(frames.at(-1).mini,1);
+ await page.screenshot({path:path.join(output,'returned-dark.png')});
+ await page.locator('#mini-player .mini-meta').click();await page.waitForTimeout(700);
+ const cdp=await page.context().newCDPSession(page);
+ const box=await page.locator('#player-pages').boundingBox(),y=box.y+box.height*.4,x=box.x+box.width*.7;
+ await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});
+ await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x-45,y}]});
+ await page.waitForTimeout(50);
+ const dragged=await page.locator('#player-pages').evaluate(e=>Number(e.style.getPropertyValue('--page')));
+ assert.ok(dragged>1.04&&dragged<1.3,'Pager does not follow the finger before release');
+ await page.screenshot({path:path.join(output,'pager-drag-dark.png')});
+ await cdp.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});await page.waitForTimeout(650);
+ assert.ok(Math.abs(await page.locator('#player-pages').evaluate(e=>Number(e.style.getPropertyValue('--page')))-1)<.001,'Cancelled pager did not spring back');
+ await page.locator('[data-action=player_lyrics]').click();await page.waitForTimeout(650);
+ const reverse=await page.evaluate(async()=>{const first=auralisBack(),second=auralisBack();await new Promise(r=>setTimeout(r,100));const layer=document.querySelector('#player-surface'),before=layer.style.transform;auralisUpdate(JSON.stringify({type:'open_player'}));return {first,second,continuous:before===layer.style.transform,visible:document.querySelector('#player').classList.contains('visible')};});
+ assert.deepEqual(reverse,{first:true,second:true,continuous:true,visible:true},'Lyrics-page return/reopen restarted the transition or leaked a second Back');
+ await page.waitForTimeout(700);
+ await page.evaluate(()=>auralisBack());
+ for(let i=0;i<5;i++){data.status=i%2?'Catalog refreshed':'';await content();await page.waitForTimeout(60);}
+ await page.waitForTimeout(650);
+ assert.equal(await page.locator('#player.mounted').count(),0,'Native content refresh stranded the closing layer');
+ assert.equal(await page.locator('#shared-artwork').count(),0);
+ assert.equal(await page.locator('#mini-player .mini-art').evaluate(e=>getComputedStyle(e).visibility),'visible');
+ assert.equal(await page.locator('#dock').getAttribute('inert'),null);
+ assert.equal(await page.locator('#navigation').evaluate(e=>Number(getComputedStyle(e).opacity)),1);
+ for(const bar of ['normal','floating']){
+   data.uiPreferences={bar};await content();live.playing=true;await page.evaluate(live=>auralisUpdate(JSON.stringify({type:'playback',state:live})),live);await page.waitForTimeout(600);
+   assert.ok(await page.locator('#mini-player').evaluate(e=>e.getBoundingClientRect().height)>150);
+   await page.locator('#mini-player .mini-meta').click();await page.waitForTimeout(700);await page.evaluate(()=>auralisBack());await page.waitForTimeout(850);
+   assert.equal(await page.locator('#mini-player').evaluate(e=>Math.round(e.getBoundingClientRect().height)),bar==='normal'?68:64);
+   assert.equal(await page.locator('#mini-player').evaluate(e=>e.classList.contains('expanded')),false);
+   assert.equal(await page.locator('#float-actions').evaluate(e=>getComputedStyle(e).transform),'matrix(1, 0, 0, 1, 0, 0)');
+   live.playing=false;await page.evaluate(live=>auralisUpdate(JSON.stringify({type:'playback',state:live})),live);
+ }
+ data.reducedMotion=true;await content();await page.waitForTimeout(400);await page.locator('#mini-player .mini-meta').click();await page.evaluate(()=>auralisBack());
+ assert.equal(await page.locator('#player.mounted').count(),0,'Reduced motion leaves a closing surface');
+ assert.equal(await page.locator('#mini-player').evaluate(e=>Number(getComputedStyle(e).opacity)),1);
+ console.log('PASS: return foreground handoff, touch-follow/cancel, lyrics-page reversal, repeated Back, native refresh during close, expanded mini restoration in both styles and reduced motion.');
+ }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1});

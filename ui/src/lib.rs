@@ -34,6 +34,7 @@ struct SheetLayers {
     cover: Element,
     artwork: Element,
     mini: Element,
+    dock: Element,
     nav: Element,
     overlay: Option<Element>,
     width: f64,
@@ -101,6 +102,12 @@ struct App {
     sheet_layers: Option<SheetLayers>,
     lyrics_mounted: bool,
     sheet_bounds: [f64; 4],
+    sheet_radius: f64,
+    pager: motion::Spring,
+    pager_layer: Option<Element>,
+    pager_dragging: bool,
+    pager_start: f64,
+    pager_width: f64,
     last_frame: f64,
     mini_until: f64,
     cover_flip_until: f64,
@@ -343,6 +350,16 @@ pub fn start() -> Result<(), JsValue> {
                 event.client_y() as f64,
                 zone.into(),
             ));
+            if zone == "player" {
+                app.pager_start = app.pager.position;
+                app.pager_width = app
+                    .pager_layer
+                    .as_ref()
+                    .map(|e| e.client_width() as f64)
+                    .unwrap_or(1.0)
+                    .max(1.0);
+                app.pager_dragging = false;
+            }
             if !app.overlay_closing
                 && element.as_ref().is_some_and(|e| {
                     e.closest(".sheet-handle,#sheet-header")
@@ -371,6 +388,32 @@ pub fn start() -> Result<(), JsValue> {
     let sheet_move = Closure::<dyn FnMut(PointerEvent)>::new(|event: PointerEvent| {
         APP.with(|state| {
             let mut app = state.borrow_mut();
+            if let Some((x, y, zone)) = app.pointer.as_ref() {
+                if zone == "player" && app.player {
+                    let dx = event.client_x() as f64 - *x;
+                    let dy = event.client_y() as f64 - *y;
+                    if app.pager_dragging || (dx.abs() > 10.0 && dx.abs() > dy.abs() * 1.35) {
+                        if !app.pager_dragging {
+                            app.pager_dragging = true;
+                            if app.pager_start > 0.5 && app.pager_start < 1.5 && dx < 0.0 {
+                                app.ensure_lyrics();
+                            }
+                        }
+                        let width = app.pager_width;
+                        let p = app.pager_start - dx / width;
+                        let p = if p < 0.0 {
+                            p * 0.15
+                        } else if p > 2.0 {
+                            2.0 + (p - 2.0) * 0.15
+                        } else {
+                            p
+                        };
+                        app.pager.place(p);
+                        app.paint_pager();
+                        app.suppress_click = now() + 350.0;
+                    }
+                }
+            }
             if let Some((y, start)) = app.sheet_drag {
                 let dy = (event.client_y() as f64 - y).max(0.0);
                 if let Some(layers) = app.overlay_layers.as_ref() {
@@ -420,6 +463,11 @@ pub fn start() -> Result<(), JsValue> {
                     app.suppress_click = now() + 350.0;
                     app.show_player_page();
                 }
+                if zone == "player" {
+                    app.pager_dragging = false;
+                    let target = app.player_page as f64;
+                    app.pager.to(target);
+                }
             }
             if app.browse_until.is_infinite() {
                 app.browse_until = now() + 1800.0;
@@ -432,6 +480,9 @@ pub fn start() -> Result<(), JsValue> {
         APP.with(|s| {
             let mut app = s.borrow_mut();
             app.pointer = None;
+            app.pager_dragging = false;
+            let target = app.player_page as f64;
+            app.pager.to(target);
             if app.sheet_drag.take().is_some() {
                 app.overlay_spring.to(1.0);
             }
@@ -465,6 +516,12 @@ pub fn start() -> Result<(), JsValue> {
             app.layout_shell();
             app.cache_overlay_layers();
             app.sheet_drag = None;
+            app.pointer = None;
+            app.pager_dragging = false;
+            let page = app.player_page as f64;
+            app.pager.place(page);
+            app.pager.to(page);
+            app.paint_pager();
             app.sync_dock();
             app.fit_cover();
             app.unmount_morph();
@@ -570,6 +627,9 @@ pub fn system_back() -> bool {
         }
         if app.player {
             app.close_player();
+            return true;
+        }
+        if !app.sheet_spring.settled() {
             return true;
         }
         if s(&app.data, "page") != "home" {
@@ -1197,6 +1257,11 @@ impl App {
     fn paint_mini(&mut self) {
         self.mini_lines = parse_lrc(s(&self.data, "lyrics"));
         set_html("mini-player", &render::mini(&self.live, &self.data));
+        self.paint_mini_pose();
+        if self.sheet_layers.is_some() {
+            self.cache_sheet_layers();
+            self.apply_sheet(self.sheet_spring.position);
+        }
     }
     fn paint_player(&mut self) {
         self.wash_transform.clear();
@@ -1317,7 +1382,7 @@ impl App {
             .collect();
     }
     fn ensure_lyrics(&mut self) {
-        if self.player_page != 2 || self.lyrics_mounted {
+        if (self.player_page != 2 && !self.pager_dragging) || self.lyrics_mounted {
             return;
         }
         set_html(
@@ -1349,6 +1414,7 @@ impl App {
                     el("cover-art")?
                 },
                 mini: el("mini-player")?,
+                dock: el("dock")?,
                 nav: el("navigation")?,
                 overlay: el("shared-artwork"),
                 width,
@@ -1465,26 +1531,53 @@ impl App {
             }
             self.mini_expanded = expanded;
         }
+        if (value - self.mini_written).abs() > 0.0004 {
+            self.mini_written = value;
+            self.paint_mini_pose();
+        }
+    }
+    fn paint_mini_pose(&self) {
         if let Some(mini) = el("mini-player") {
-            if (value - self.mini_written).abs() > 0.0004 {
-                self.mini_written = value;
-                style(&mini, "--mini", &format!("{value:.4}"));
-                if let Some(actions) = el("float-actions") {
-                    style(
-                        &actions,
-                        "transform",
-                        &format!("translateY({}px)", -134.0 * value),
-                    );
-                }
+            style(&mini, "--mini", &format!("{:.4}", self.mini.position));
+            class(&mini, "expanded", self.mini_expanded);
+        }
+        if let Some(actions) = el("float-actions") {
+            let extra = if customization::get(&self.data, "bar") == "floating" {
+                138.0
+            } else {
+                134.0
+            };
+            style(
+                &actions,
+                "transform",
+                &format!("translateY({}px)", -extra * self.mini.position),
+            );
+        }
+    }
+    fn paint_pager(&self) {
+        if let Some(pages) = self.pager_layer.as_ref() {
+            style(pages, "--page", &self.pager.position.to_string());
+        }
+    }
+    fn advance_pager(&mut self, dt: f64) {
+        if self.player && !self.pager_dragging && !self.pager.settled() {
+            if self.reduced {
+                self.pager.place(self.player_page as f64);
+            } else {
+                self.pager.sample(dt, motion::Feel::PAGER);
             }
+            self.paint_pager();
         }
     }
     fn show_player_page(&mut self) {
         self.ensure_lyrics();
         self.fit_cover();
-        if let Some(pages) = el("player-pages") {
-            style(&pages, "--page", &self.player_page.to_string());
+        self.pager_layer = el("player-pages");
+        if self.reduced {
+            self.pager.place(self.player_page as f64);
         }
+        self.pager.to(self.player_page as f64);
+        self.paint_pager();
         if let Some(player) = el("player") {
             class(&player, "lyrics-page", self.player_page == 2);
         }
@@ -1512,6 +1605,8 @@ impl App {
     /// comes from computed styles, which is why a circular cover morphs correctly.
     fn measure_morph(&mut self) -> Option<CoverMorph> {
         let mini = el("mini-player")?;
+        self.sheet_bounds = rect(&mini);
+        self.sheet_radius = corner_radius(&mini, self.sheet_bounds[2].min(self.sheet_bounds[3]));
         let mini_art = mini.query_selector(".mini-art").ok().flatten()?;
         let cover = if self.player_page == 2 {
             find("#player .identity-art")?
@@ -1520,7 +1615,6 @@ impl App {
         };
         let from = rect(&mini_art);
         let to = rect(&cover);
-        self.sheet_bounds = rect(&mini);
         if from[2] < 2.0 || from[3] < 2.0 || to[2] < 2.0 || to[3] < 2.0 {
             return None;
         }
@@ -1563,14 +1657,18 @@ impl App {
             overlay.remove();
         }
         self.morph = None;
+        if let Some(mini) = el("mini-player") {
+            class(&mini, "sharing-artwork", false);
+        }
         if let Some(layers) = self.sheet_layers.as_mut() {
             layers.overlay = None;
         }
     }
     fn begin_sheet(&mut self, open: bool) {
         self.player = open;
-        if !self.reduced && !self.sheet_spring.settled() && self.morph.is_some() {
+        if !self.reduced && !self.sheet_spring.settled() {
             self.sheet_spring.to(if open { 1.0 } else { 0.0 });
+            self.apply_sheet(self.sheet_spring.position);
             return;
         }
         if let Some(content) = find("#player .player-safe") {
@@ -1586,6 +1684,7 @@ impl App {
                 style(&mini, "--mini", "0");
                 class(&mini, "expanded", false);
             }
+            self.paint_mini_pose();
         }
         self.morph = if self.reduced {
             None
@@ -1619,7 +1718,7 @@ impl App {
         }
         self.animation_vote = true;
         post(json!({"type":"animation_rate","active":true}));
-        if !self.reduced && !self.sheet_spring.settled() && self.morph.is_some() {
+        if !self.reduced && !self.sheet_spring.settled() {
             self.player = true;
             self.sheet_spring.to(1.0);
             if let Some(player) = el("player") {
@@ -1627,9 +1726,13 @@ impl App {
                 let _ = player.set_attribute("aria-hidden", "false");
                 let _ = player.remove_attribute("inert");
             }
+            self.apply_sheet(self.sheet_spring.position);
             return;
         }
         self.player_page = 1;
+        self.pager.place(1.0);
+        self.pager.to(1.0);
+        self.pager_dragging = false;
         self.paint_player();
         if let Some(player) = el("player") {
             class(&player, "mounted", true);
@@ -1644,6 +1747,10 @@ impl App {
         if !self.player {
             return;
         }
+        self.animation_vote = true;
+        post(json!({"type":"animation_rate","active":true}));
+        self.pager_dragging = false;
+        self.pointer = None;
         if let Some(player) = el("player") {
             class(&player, "visible", false);
             let _ = player.set_attribute("aria-hidden", "true");
@@ -1661,6 +1768,7 @@ impl App {
         };
         let p = p.clamp(0.0, 1.0);
         let q = 1.0 - p;
+        let blend = motion::sheet_blend(p);
         let [x, y, mw, mh] = self.sheet_bounds;
         let sx = (mw + (layers.width - mw) * p) / layers.width.max(1.0);
         let sy = (mh + (layers.height - mh) * p) / layers.height.max(1.0);
@@ -1675,33 +1783,49 @@ impl App {
                 sy
             ),
         );
-        let r = 26.0 * q * q;
+        let r = self.sheet_radius * q * q;
         style(
             &layers.surface,
             "border-radius",
             &format!("{}px / {}px", r / sx.max(0.001), r / sy.max(0.001)),
         );
-        style(
-            &layers.surface,
-            "opacity",
-            if p > 0.0005 { "1" } else { "0" },
-        );
-        style(
-            &layers.content,
-            "opacity",
-            &motion::ease_out((p - 0.25) / 0.65).to_string(),
-        );
+        style(&layers.surface, "opacity", &blend.background.to_string());
+        style(&layers.content, "opacity", &blend.content.to_string());
         style(
             &layers.content,
             "transform",
             &format!("translate3d(0,{:.3}px,0)", 18.0 * q),
         );
-        style(&layers.mini, "opacity", &q.to_string());
-        style(&layers.nav, "opacity", &q.to_string());
+        style(&layers.mini, "opacity", &blend.mini.to_string());
+        style(&layers.nav, "opacity", &blend.mini.to_string());
+        style(
+            &layers.dock,
+            "z-index",
+            if blend.mini_above { "6" } else { "2" },
+        );
+        if !self.player && p <= 0.2 {
+            let _ = layers.dock.remove_attribute("inert");
+        } else {
+            let _ = layers.dock.set_attribute("inert", "");
+        }
+        style(
+            &layers.player,
+            "pointer-events",
+            if self.player || p > 0.2 {
+                "auto"
+            } else {
+                "none"
+            },
+        );
+        class(
+            &layers.mini,
+            "sharing-artwork",
+            self.morph.is_some() && p > 0.0 && p < 1.0,
+        );
         style(
             &layers.nav,
             "transform",
-            &format!("translate3d(0,{}px,0)", 72.0 * p),
+            &format!("translate3d(0,{}px,0)", 72.0 * (1.0 - blend.mini)),
         );
         if p <= 0.0005 && !self.player {
             class(&layers.player, "mounted", false);
@@ -2100,6 +2224,7 @@ impl App {
         self.advance_dock(dt);
         self.advance_mini(time, dt);
         self.advance_sheet(dt);
+        self.advance_pager(dt);
         self.advance_shell(dt);
         let animating = !self.dock.settled()
             || !self.mini.settled()
@@ -2108,6 +2233,7 @@ impl App {
             || !self.route_spring.settled()
             || !self.overlay_spring.settled()
             || self.sheet_drag.is_some()
+            || (self.player && (!self.pager.settled() || self.pager_dragging))
             || (self.player && self.player_page == 2 && b(&self.live, "playing"));
         if animating != self.animation_vote {
             self.animation_vote = animating;

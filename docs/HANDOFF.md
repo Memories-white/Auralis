@@ -2,7 +2,42 @@
 
 > 每次改动后更新此表；入口约定已写入根目录 `AGENTS.md`。布局、交互、设置校验和动画以 Rust 为主，Android 只做必要的平台桥接。
 
-## 当前交付 · 0.5.7
+## 当前交付 · 0.5.8
+
+| 项目 | 状态 / 入口 |
+| :-- | :-- |
+| 日期、版本 | 2026-11-27 · 0.5.8-preview · versionCode 35 |
+| 源码基线 | d9caacb240e3fad2a340e83291602338abc941fa，已推送的0.5.7 |
+| 当前提交 | 本表随本轮代码提交至main并核对远端；使用git log -1获取完整SHA |
+| APK | APKs/Auralis-v0.5.8-preview.apk · 16238683字节 |
+| SHA256 | AEE9148FF05AF393EED46B3A997414E055969B97A814B278323E450EC72D4B17 |
+| 签名与数据 | apksigner v2通过；沿用debug证书a1dab650d1c39a63e21255150995b50e2cac236337e794c33a96e7db292cbfde和包名，不清账号/播放数据 |
+| 安装 / 发布 | 本轮未安装手机；用户会后续通知USB连接。不创建Release；APK保留本地忽略目录，源码推送main |
+
+### 本轮交接表：录屏返回重叠
+
+| 用户反馈 / 边界 | 改动与准确入口 | 验证、限制与下一步 |
+| :-- | :-- | :-- |
+| 对照录屏 | 查看用户55.8秒视频：前段Melox，后段Auralis；原始材料与抽帧仅保留device-debug/video-1127忽略目录 | 录屏Auralis为三栏导航，不能据此认定安装的确切版本；当前四栏源码仍能重现相同背景遮挡，未将问题简单归为旧包 |
+| 返回只见封面/渐变，文字按钮被挡 | ui/src/motion.rs::sheet_blend与lib.rs::apply_sheet：背景在p0–0.2交接，mini前景在p0–0.3恢复，末段把dock临时置于播放层上方；全页控件使用p0.1–0.6渐显 | 新tools/check-player-handoff.cjs先在0.5.7真实WASM失败：surface opacity始终1；修复后同一用例通过。尾段采样验证surface<0.7、mini前景恢复、最终播放器卸载/mini opacity1 |
+| 两份封面与圆角打架 | lib.rs::measure_morph读取实际mini圆角/容器边界；apply_sheet通过sharing-artwork仅在共享封面飞行期间隐藏真实mini封面；unmount_morph清理 | 保留已有封面资源复用与共享元素；不是额外截图背景叠加。浏览器检查封面交接、反向中断仍通过；手机GPU材质与合成需后续实测 |
+| 歌词页返回后马上点开跳回起点 | lib.rs::begin_sheet/open_player：反向运行只依赖弹簧是否未结束，不再依赖有无morph；保持当前进度/速度与层，不重新从0开始 | focused真实WASM覆盖无共享封面的歌词页，比较反向前后的surface transform不变；连续两次系统Back均消费，不穿透退出App |
+| 内容回传后姿态失配 | lib.rs::paint_mini/paint_mini_pose重建后恢复mini高度、expanded类、浮动定位偏移和当前sheet pose；关闭时同步重置定位偏移 | 回归在close中连续5次content回传，验证最后无mounted、无shared-artwork、真实封面可见、dock不残留inert、导航opacity1；标准和悬浮展开mini返回分别恢复68/64px |
+| 封面/歌词切页不跟手，内容刷新重播CSS动画 | lib.rs::pager/paint_pager/advance_pager与PointerEvent回调；motion.rs::Feel::PAGER；style.css::.player-strip删除CSS transform transition | Rust弹簧与手指共享同一页进度；按下时缓存宽度，逐帧不读布局。CDP真触摸验证未松手进度在1与2之间、取消后回1；水平手势先区分竖向，保留歌词浏览/自动恢复；仅拖向歌词时准备歌词DOM |
+| 缩放/方向变化 | resize取消当前pager手势并回到选定页，复用原窗口与路由所有权；关闭阶段不推进横向页动画 | 未增加Kotlin页面或JS动画控制器；原生桥、登录、协议和播放逻辑不改。减少动态即时落位，无残留层 |
+| Miuix与Melox依据 | 保留Miuix 0.9.5-beta01主题/inset、现有标准/悬浮尺寸；研究Melox固定bfe7c5dc467b84d7a9df8e63c93208a3e6f61672的PlayerSheetTransition.kt阶段/输入交接 | 该文件未标Apache，因此仅行为研究，Rust交接函数/手势独立实现，不复制GPL渲染代码；不声称原生材质或字体栅格逐像素相同 |
+| 测试 / 性能 | Rust UI31/core44、Java4组、完整WASM/NDK/Gradle构建通过；focused回归和原check-rust-ui.cjs通过；lint0错误0警告 | handoff-058浏览器探针68回调，中位16.7ms/P95约16.8ms，ScriptDuration约9ms、LayoutDuration约3.4ms/整个采样窗；只是Chromium证据，不能当作手机帧率或相对性能改进结论 |
+
+### 下一步：实机核对
+
+1. 用户告知USB连接后，先确认安装versionCode35，再保留数据安装本地APK；不清账号/缓存，不重复要求现在连接。
+2. 暂停、播放、mini自动展开时分别测试进入/返回；从歌词页连续返回和半途再打开；比较视频里的遮挡是否消失。
+3. 检查封面⇄歌词拖动、取消、连续快滑和歌词数据回传时的位置；再记录FrameTimeline/实际呈现帧。浏览器通过不能替代这些检查。
+4. 如仍有可见差异，按具体帧调整对应所有权/交接阶段，继续用Rust；保留用户原始录屏于忽略目录，不公开个人截图。
+
+---
+
+## 0.5.7 历史交付
 
 | 项目 | 状态 / 入口 |
 | :-- | :-- |

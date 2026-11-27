@@ -1,3 +1,13 @@
+# v0.5.8-preview 返回/切页交接（2026-11-27）
+
+- 对照用户录屏抽帧，当前源码也重现了返回末段背景保持opacity1遮挡歌曲栏；先记录失败，再用同一真实WASM检查验证修复，未以旧版录屏为由跳过问题。
+- check-player-handoff.cjs覆盖背景/前景交接、指尖未松手进度、取消回弹、无共享封面的歌词页反向展开、连续Back、关闭期间5次content回传、两种mini展开后恢复及减少动态；check-rust-ui.cjs原二维码、封面复用/转场、触屏、歌词、700首歌单和设置回归通过。
+- UI31/core44/Java4组通过，完整WASM/NDK/Gradle构建、原证书v2通过；code35，本地APK哈希在docs/HANDOFF.md。比较0.5.7与0.5.8 APK未缺失任何zip条目。
+- handoff-058浏览器探针68回调，间隔中位16.7ms/P95约16.8ms；采样窗ScriptDuration约9ms、LayoutDuration约3.4ms，不代表手机GPU呈现帧率。样式lint0错误0警告。
+- 只使用本地测试夹具截图；用户原视频/截图抽帧不公开。本轮未安装手机、不创建Release；等待用户通知USB后再保留数据验证实际合成与连续操作。
+
+---
+
 # v0.5.7-preview 恢复歌词与参考界面（2026-11-27）
 
 - Rust UI30、core44和Java4组通过，含无需session/播放的缓存恢复与损坏/限额检查；完整Rust/WASM、NDK和Gradle构建通过。APK code34、原证书v2通过，哈希在docs/HANDOFF.md。
