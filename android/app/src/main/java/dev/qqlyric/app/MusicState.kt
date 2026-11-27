@@ -25,6 +25,7 @@ class MusicState(private val context:Context,private val protocol:(String,String
     private val secure=SecureStore(context)
     private val prefs=context.getSharedPreferences("library",Context.MODE_PRIVATE)
     private val playbackPrefs=context.getSharedPreferences(PlaybackStore.PREFS,Context.MODE_PRIVATE)
+    private val catalogPrefs=context.getSharedPreferences("artwork-catalog",Context.MODE_PRIVATE)
     private var savedPlayback=PlaybackStore.read(context)
     private var savedPlaybackDirty=false
     private val playbackListener=android.content.SharedPreferences.OnSharedPreferenceChangeListener{_,key->if(key==PlaybackStore.KEY)savedPlaybackDirty=true}
@@ -39,6 +40,8 @@ class MusicState(private val context:Context,private val protocol:(String,String
     private var homeGeneration=0
     private var feedGeneration=0
     private var feedPage=1
+    private var replacingDiscovery=false
+    private var libraryFromCache=false
     var discoverySongs by mutableStateOf(emptyList<JSONObject>())
     var discoveryLoading by mutableStateOf(false)
     var discoveryMore by mutableStateOf(true)
@@ -107,7 +110,22 @@ class MusicState(private val context:Context,private val protocol:(String,String
     val avatar get()=profile.optString("avatar").takeIf{it.startsWith("http")}?.replace("http://","https://")
         ?: uin.takeIf{it.matches(Regex("[0-9]{5,11}"))}?.let{"https://q1.qlogo.cn/g?b=qq&nk=$it&s=160"} ?: ""
     private var alive=true
-    init{prefs.registerOnSharedPreferenceChangeListener(historyListener);playbackPrefs.registerOnSharedPreferenceChangeListener(playbackListener);prefs.edit().putString("ui_style","MIUIX").apply();refreshHome();if(loggedIn)refreshProfile()}
+    init{prefs.registerOnSharedPreferenceChangeListener(historyListener);playbackPrefs.registerOnSharedPreferenceChangeListener(playbackListener);prefs.edit().putString("ui_style","MIUIX").apply();restoreCatalog();refreshHome();if(loggedIn)refreshProfile()}
+    private fun restoreCatalog(){
+        if(!loggedIn||catalogPrefs.getString("account","")!=uin)return
+        runCatching{JSONObject(catalogPrefs.getString("value","{}").orEmpty())}.getOrNull()?.let{cached->
+            home=cached.optJSONObject("home")?:JSONObject();library=cached.optJSONObject("library")?:JSONObject()
+            libraryFromCache=library.length()>0
+            discoverySongs=cached.optJSONArray("discovery")?.objects().orEmpty()
+        }
+    }
+    private fun saveCatalog(){
+        if(!loggedIn)return
+        val input=JSONObject().put("home",home).put("library",library).put("discovery",JSONArray(discoverySongs)).toString()
+        val account=uin
+        // Rust strips unsupported fields and bounds every shelf. Apply is asynchronous.
+        runCatching{JSONObject(protocol("artwork_catalog",input)).optJSONObject("data")}.getOrNull()?.toString()?.takeIf{it.length<=256*1024}?.let{value->catalogPrefs.edit().putString("account",account).putString("value",value).apply()}
+    }
     private fun call(name:String,args:JSONObject=JSONObject(),done:(JSONObject)->Unit){
         val expected=epoch
         val input=args.toString()
@@ -133,25 +151,25 @@ class MusicState(private val context:Context,private val protocol:(String,String
         busy=true;status=context.getString(R.string.loading_recommendations)
         call("home",JSONObject().put("session",session)){result->
             if(generation!=homeGeneration)return@call
-            busy=false;if(!failed(result)){home=result.getJSONObject("data");status="";resetDiscovery()}
+            busy=false;if(!failed(result)){home=result.getJSONObject("data");status="";saveCatalog();resetDiscovery()}
         }
     }
-    private fun resetDiscovery(){feedGeneration++;feedPage=1;discoverySongs=emptyList();discoveryLoading=false;discoveryMore=true;discoveryError="";loadMoreDiscovery()}
+    private fun resetDiscovery(){feedGeneration++;feedPage=1;replacingDiscovery=true;discoveryLoading=false;discoveryMore=true;discoveryError="";loadMoreDiscovery()}
     fun loadMoreDiscovery(){
         if(!loggedIn||discoveryLoading||!discoveryMore)return
         val request=feedGeneration
         val daily=home.optJSONArray("daily")?.objects().orEmpty()
         discoveryLoading=true;discoveryError=""
         call("recommend",JSONObject().put("session",session).put("page",feedPage)
-            .put("exclude",JSONArray((daily+discoverySongs).map{it.optString("mid")}))
+            .put("exclude",JSONArray((daily+if(replacingDiscovery)emptyList()else discoverySongs).map{it.optString("mid")}))
             .put("excludeIds",JSONArray(daily.map{it.optLong("id")}))){result->
             if(request!=feedGeneration)return@call
             discoveryLoading=false
             if(!result.optBoolean("ok")){discoveryError=result.optString("error",context.getString(R.string.request_retry));return@call}
             val data=result.getJSONObject("data")
-            val blocked=(home.optJSONArray("daily")?.objects().orEmpty()+discoverySongs).map{it.optString("mid")}.toHashSet()
+            val blocked=(home.optJSONArray("daily")?.objects().orEmpty()+if(replacingDiscovery)emptyList()else discoverySongs).map{it.optString("mid")}.toHashSet()
             val added=data.optJSONArray("songs")?.objects().orEmpty().filter{blocked.add(it.optString("mid"))}
-            discoverySongs=discoverySongs+added;feedPage=data.optInt("nextPage",feedPage+1)
+            discoverySongs=(if(replacingDiscovery)emptyList()else discoverySongs)+added;replacingDiscovery=false;feedPage=data.optInt("nextPage",feedPage+1);saveCatalog()
             discoveryMore=data.optBoolean("hasMore")&&added.isNotEmpty()
             if(BuildConfig.DEBUG)android.util.Log.i("AuralisDiscovery","batch=${added.size} total=${discoverySongs.size} next=$feedPage more=$discoveryMore dailyOverlap=${discoverySongs.count{s->daily.any{it.optString("mid")==s.optString("mid")}}}")
         }
@@ -159,7 +177,7 @@ class MusicState(private val context:Context,private val protocol:(String,String
     fun refreshLibrary(){
         if(!loggedIn)return
         busy=true;status=context.getString(R.string.loading_library)
-        call("library",JSONObject().put("session",session)){result->busy=false;if(!failed(result)){library=result.getJSONObject("data");status=""}}
+        call("library",JSONObject().put("session",session)){result->busy=false;if(!failed(result)){library=result.getJSONObject("data");libraryFromCache=false;status="";saveCatalog()}}
     }
     fun navigate(destination:String){
         if(destination==page)return
@@ -167,7 +185,7 @@ class MusicState(private val context:Context,private val protocol:(String,String
         if(destination!="songs")cancelDetail()
         if(destination=="home"||destination=="mine"||destination=="settings")backStack.clear() else backStack.add(page)
         page=destination;status="";busy=false
-        if(destination=="mine"&&loggedIn&&library.length()==0)refreshLibrary()
+        if(destination=="mine"&&loggedIn&&(library.length()==0||libraryFromCache))refreshLibrary()
     }
     private fun cancelDetail(){detailLoading=false;detailError="";detailRequest=null}
     fun back(){playlistGeneration++;searchGeneration++;cancelDetail();page=if(backStack.isNotEmpty())backStack.removeAt(backStack.lastIndex)else "home";status="";busy=false}
@@ -369,6 +387,6 @@ class MusicState(private val context:Context,private val protocol:(String,String
         }
     }
     fun dismissLogin(){loginGeneration++;qrOpen=false}
-    fun logout(){cancelDetail();homeGeneration++;feedGeneration++;discoverySongs=emptyList();discoveryLoading=false;discoveryMore=true;discoveryError="";collectionBusy=false;collectionMessage="";epoch++;loginGeneration++;playGeneration++;pendingMid=null;pendingToken=null;backStack.clear();secure.clear();session=JSONObject();profile=JSONObject();loggedIn=false;home=JSONObject();library=JSONObject();page="home";status=context.getString(R.string.logged_out);playbackStatus="";command("STOP")}
+    fun logout(){catalogPrefs.edit().clear().apply();cancelDetail();homeGeneration++;feedGeneration++;discoverySongs=emptyList();discoveryLoading=false;discoveryMore=true;discoveryError="";collectionBusy=false;collectionMessage="";epoch++;loginGeneration++;playGeneration++;pendingMid=null;pendingToken=null;backStack.clear();secure.clear();session=JSONObject();profile=JSONObject();loggedIn=false;home=JSONObject();library=JSONObject();page="home";status=context.getString(R.string.logged_out);playbackStatus="";command("STOP")}
     fun close(){prefs.unregisterOnSharedPreferenceChangeListener(historyListener);playbackPrefs.unregisterOnSharedPreferenceChangeListener(playbackListener);alive=false;loginGeneration++;worker.shutdownNow();feedWorker.shutdownNow();detailWorker.shutdownNow();ui.removeCallbacksAndMessages(null)}
 }

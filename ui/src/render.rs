@@ -25,7 +25,10 @@ fn button(action: &str, key: &str, primary: bool) -> String {
 fn art(url: &str, avatar: bool, class: &str) -> String {
     let placeholder = icon(if avatar { "account" } else { "music" });
     let image = if url.starts_with("https://") || url.starts_with("http://") {
-        format!("<img src=\"https://auralis.local/artwork?avatar={}&amp;player={}&amp;url={}\" alt=\"\" loading=\"lazy\" decoding=\"async\" />",avatar,class.contains("player-cover"),esc(js_sys::encode_uri_component(url).as_string().as_deref().unwrap_or("")))
+        format!(
+            "<img data-art-src=\"{}\" alt=\"\" decoding=\"sync\" />",
+            esc(&crate::artwork::source(url, avatar))
+        )
     } else {
         String::new()
     };
@@ -224,9 +227,26 @@ fn transport(live: &Value, mini: bool) -> String {
         action("next", &label("next"), "next", "")
     )
 }
-pub fn mini(live: &Value, _data: &Value) -> String {
+pub fn mini(live: &Value, data: &Value) -> String {
+    let saved = &data["currentSong"];
+    let restored_cover = cover(saved);
+    let image = if s(live, "cover").is_empty() {
+        restored_cover.as_str()
+    } else {
+        s(live, "cover")
+    };
+    let title = if s(live, "title").is_empty() {
+        s(saved, "title")
+    } else {
+        s(live, "title")
+    };
+    let artist = if s(live, "artist").is_empty() {
+        s(saved, "artist")
+    } else {
+        s(live, "artist")
+    };
     format!("<div class=mini-identity>{}<span><strong>{}</strong><small>{}</small></span><div class=mini-compact>{}{}</div>{}</div><div class=mini-progress>{}</div><div class=mini-expanded>{}{}<div class=mini-tools>{}{}</div></div>",
-        art(s(live,"cover"),false,"mini-art"),escaped_or(s(live,"title"),"select_song"),esc(s(live,"artist")),
+        art(image,false,"mini-art"),escaped_or(title,"select_song"),esc(artist),
         action("play",&label(if b(live,"playing"){"pause"}else{"play"}),if b(live,"playing"){"pause"}else{"play"},""),action("queue",&label("play_queue"),"queue",""),action("collapse_mini",&label("collapse_player"),"down","collapse-mini"),
         seek(),times(),transport(live,true),action("favorite",&label("local_favorites"),"heart",if b(live,"favorite"){"active"}else{""}),action("queue",&label("play_queue"),"queue",""))
 }

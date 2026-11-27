@@ -89,7 +89,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
         settings.allowFileAccess=false;settings.allowContentAccess=false
         settings.domStorageEnabled=false;settings.databaseEnabled=false
         settings.blockNetworkLoads=true
-        settings.cacheMode=WebSettings.LOAD_NO_CACHE
+        settings.cacheMode=WebSettings.LOAD_DEFAULT
         settings.setSupportZoom(false)
         overScrollMode=OVER_SCROLL_NEVER
         addJavascriptInterface(Bridge(),"AuralisNative")
@@ -109,7 +109,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
     }
     fun openPlayer(){requestedPlayer=true;if(ready){send("open_player",JSONObject());requestedPlayer=false}}
     fun close(){closed=true;worker.shutdownNow();removeJavascriptInterface("AuralisNative");stopLoading();destroy()}
-    private fun empty()=WebResourceResponse("text/plain","UTF-8",404,"Not Found",emptyMap(),ByteArrayInputStream(ByteArray(0)))
+    private fun empty()=WebResourceResponse("text/plain","UTF-8",404,"Not Found",mapOf("Cache-Control" to "no-store"),ByteArrayInputStream(ByteArray(0)))
     private fun resource(uri:Uri):WebResourceResponse{
         if(uri.scheme!="https"||uri.host!="auralis.local")return empty()
         return runCatching{
@@ -117,11 +117,8 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
                 "/artwork"->{
                     val url=uri.getQueryParameter("url").orEmpty()
                     val avatar=uri.getQueryParameter("avatar")=="true"
-                    val bitmap=ArtworkCache.load(activity,url,avatar,uri.getQueryParameter("player")=="true")?:return empty()
-                    val stream=ByteArrayOutputStream()
-                    @Suppress("DEPRECATION") val format=if(Build.VERSION.SDK_INT>=30)Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
-                    bitmap.compress(format,76,stream)
-                    WebResourceResponse("image/webp",null,200,"OK",mapOf("Cache-Control" to "private,max-age=3600"),ByteArrayInputStream(stream.toByteArray()))
+                    val bytes=ArtworkCache.loadEncoded(activity,url,avatar)?:return empty()
+                    WebResourceResponse("image/webp",null,200,"OK",mapOf("Cache-Control" to "private,max-age=86400"),ByteArrayInputStream(bytes))
                 }
                 "/qr"->{val bitmap=qr?:return empty();val stream=ByteArrayOutputStream();bitmap.compress(Bitmap.CompressFormat.PNG,100,stream);WebResourceResponse("image/png",null,200,"OK",mapOf("Cache-Control" to "no-store"),ByteArrayInputStream(stream.toByteArray()))}
                 else->{

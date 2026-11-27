@@ -12,6 +12,8 @@ import java.security.MessageDigest
 /** Public artwork only. Call load on a worker; peek never performs disk IO. */
 object ArtworkCache {
     private data class Entry(val bitmap:Bitmap,val written:Long)
+    private data class Encoded(val bytes:ByteArray,val written:Long)
+    private val encoded=object:LruCache<String,Encoded>(2*1024*1024){override fun sizeOf(key:String,value:Encoded)=value.bytes.size}
     private val memory=object:LruCache<String,Entry>(8*1024*1024){override fun sizeOf(key:String,value:Entry)=value.bitmap.byteCount}
     private val locks=Array(16){Any()}
     @Volatile private var disk:ArtworkDiskStore?=null
@@ -27,14 +29,44 @@ object ArtworkCache {
         val entry=memory.get(key(address(url,avatar))) ?: return null
         return entry.bitmap.takeIf{System.currentTimeMillis()-entry.written<age(avatar)}
     }
-    fun load(context:Context,url:String,avatar:Boolean=false,player:Boolean=false):Bitmap? {
-        if(avatar)return loadCandidate(context,url,true,false)
+    private fun candidates(context:Context,url:String,player:Boolean):List<String> {
         val metered=runCatching{(context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).isActiveNetworkMetered}.getOrDefault(true)
-        val candidates=runCatching{
+        return runCatching{
             org.json.JSONObject(RustCore.call("artwork_candidates",org.json.JSONObject().put("url",url).put("player",player).put("metered",metered).toString())).getJSONArray("data").let{a->List(a.length()){a.getString(it)}}
         }.getOrDefault(listOf(url))
-        for(candidate in candidates){loadCandidate(context,candidate,false,player)?.let{return it}}
+    }
+    /** Reuse any cached resolution before starting a download for a larger one. */
+    fun load(context:Context,url:String,avatar:Boolean=false,player:Boolean=false):Bitmap? {
+        val candidates=if(avatar)listOf(url)else (candidates(context,url,false)+candidates(context,url,player)).distinct()
+        val now=System.currentTimeMillis()
+        for(candidate in candidates){
+            peek(candidate,avatar)?.let{return it}
+            store(context).read(key(address(candidate,avatar)),now,age(avatar))?.let{bytes->
+                BitmapFactory.decodeByteArray(bytes,0,bytes.size)?.let{bitmap->memory.put(key(address(candidate,avatar)),Entry(bitmap,now));return bitmap}
+            }
+        }
+        for(candidate in candidates){loadCandidate(context,candidate,avatar,player)?.let{return it}}
         return null
+    }
+    /** WebView gets the cached compressed bytes directly: no decode/re-encode. */
+    fun loadEncoded(context:Context,url:String,avatar:Boolean=false):ByteArray? {
+        val urls=if(avatar)listOf(url)else (candidates(context,url,false)+candidates(context,url,true)+url).distinct()
+        val now=System.currentTimeMillis()
+        val maxAge=if(avatar)age(true)else Long.MAX_VALUE
+        for(candidate in urls){
+            val cacheKey=key(address(candidate,avatar))
+            encoded.get(cacheKey)?.takeIf{now-it.written<maxAge}?.let{return it.bytes}
+            store(context).read(cacheKey,now,maxAge)?.let{bytes->encoded.put(cacheKey,Encoded(bytes,now));return bytes}
+        }
+        val bitmap=load(context,url,avatar)?:return null
+        for(candidate in urls){
+            val cacheKey=key(address(candidate,avatar))
+            store(context).read(cacheKey,now,Long.MAX_VALUE)?.let{bytes->encoded.put(cacheKey,Encoded(bytes,now));return bytes}
+        }
+        val output=ByteArrayOutputStream()
+        @Suppress("DEPRECATION") val format=if(Build.VERSION.SDK_INT>=30)Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
+        if(!bitmap.compress(format,65,output))return null
+        return output.toByteArray().also{if(it.size<=256*1024)encoded.put(key(address(url,avatar)),Encoded(it,now))}
     }
     private fun loadCandidate(context:Context,url:String,avatar:Boolean,player:Boolean):Bitmap? {
         val address=address(url,avatar)

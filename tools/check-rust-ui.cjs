@@ -30,12 +30,16 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
   try {
     const page = await browser.newPage({ viewport: { width: 411, height: 914 }, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
     const errors = [];
+    const artworkRequests = new Map();
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
     await page.addInitScript(() => { window.__actions = []; window.AuralisNative = { postMessage: value => window.__actions.push(JSON.parse(value)) }; });
     await page.route('https://auralis.local/**', async route => {
       const uri = new URL(route.request().url());
       if (uri.pathname === '/artwork') {
+        const key = uri.searchParams.get('url');
+        artworkRequests.set(key, (artworkRequests.get(key) || 0) + 1);
+        await new Promise(resolve => setTimeout(resolve, 30)); // exercise concurrent views
         const seed = [...(uri.searchParams.get('url') || '')].reduce((n, c) => n + c.charCodeAt(0), 0) % 360;
         const body = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"><defs><linearGradient id="a" x2="1" y2="1"><stop stop-color="hsl(${seed} 28% 64%)"/><stop offset="1" stop-color="hsl(${seed + 25} 36% 30%)"/></linearGradient></defs><path fill="url(#a)" d="M0 0h512v512H0z"/><circle cx="256" cy="256" r="145" fill="none" stroke="#ffffff40" stroke-width="1"/><circle cx="256" cy="256" r="105" fill="none" stroke="#ffffff30"/><path d="M210 303V186l110-22v116" fill="none" stroke="#fff9" stroke-width="10"/><circle cx="188" cy="305" r="25" fill="#fff9"/><circle cx="298" cy="282" r="25" fill="#fff9"/></svg>`;
         return route.fulfill({ contentType: 'image/svg+xml', body });
@@ -50,6 +54,17 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     const content = async () => page.evaluate(input => window.auralisUpdate(JSON.stringify({ type: 'content', state: input })), data);
     const pulse = async () => page.evaluate(input => window.auralisUpdate(JSON.stringify({ type: 'playback', state: input })), live);
     await content(); await pulse();
+    await page.waitForFunction(() => [...document.querySelectorAll('#content img[data-art-src]')].every(img => img.complete && img.naturalWidth > 0));
+    const coverRequestsAtBoot = new Map(artworkRequests);
+    assert.equal(artworkRequests.keys().next().value, data.currentSong.coverUrl, 'Restored current-song cover was queued behind the feed');
+    assert.ok([...artworkRequests.values()].every(n => n === 1), 'Duplicate cover fetches during boot');
+    await page.locator('[data-action="song:discovery:17"] img').evaluate(img => { window.__retainedCover = img; });
+    data.status = '已缓存'; await content();
+    assert.ok(await page.locator('[data-action="song:discovery:17"] img').evaluate(img => img === window.__retainedCover && img.complete && img.naturalWidth > 0), 'Content refresh discarded decoded cover');
+    data.status = ''; data.page = 'mine'; await content(); data.page = 'home'; await content();
+    await page.waitForFunction(() => [...document.querySelectorAll('#content img[data-art-src]')].every(img => img.complete && img.naturalWidth > 0));
+    for (const [url, count] of coverRequestsAtBoot) assert.equal(artworkRequests.get(url), count, 'Changing pages refetched cover ' + url);
+    assert.ok(await page.locator('#mini-player img').evaluate(img => img.complete && img.naturalWidth > 0));
     assert.equal(await page.locator('#navigation button').count(), 3);
     assert.equal(await page.locator('[data-action=daily]').count(), 1);
     assert.equal(await page.locator('[data-action="song:discovery:6"]').count(), 1, 'Shelf songs repeat in discovery rows');
@@ -164,8 +179,9 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     await page.locator('[data-action=player_lyrics]').click(); await page.waitForTimeout(150);
     assert.equal(await page.locator('#player .transport').evaluate(e => getComputedStyle(e).display), 'none');
     assert.notEqual(await page.locator('.lyric-progress').evaluate(e => getComputedStyle(e).display), 'none');
+    assert.ok([...artworkRequests.values()].every(n => n === 1), 'A cached artwork was requested more than once');
     assert.equal(errors.length, 0, errors.join('\n'));
     console.log('PASS: real Rust/WASM boot, safe layout, shelf gutter, one daily entry, player expansion, left-swipe lyrics, exact active line, manual-follow recovery, automatic mini collapse, search/IME focus, playlist filters/loading/retry, top/locate, settings dependencies, half-height sheet and wide layout.');
-    fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ result: 'passed', engine: 'real Rust/WASM; mock native service bridge', focal, bounds, screenshots: fs.readdirSync(output).filter(n => n.endsWith('.png')) }, null, 2));
+    fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ result: 'passed', engine: 'real Rust/WASM; mock native service bridge', artwork: { unique: artworkRequests.size, maximumRequestsPerArtwork: Math.max(...artworkRequests.values()), decodedNodeRetained: true, pageAndPlayerReuse: true }, focal, bounds, screenshots: fs.readdirSync(output).filter(n => n.endsWith('.png')) }, null, 2));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

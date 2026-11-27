@@ -624,6 +624,7 @@ pub fn dispatch(command: &str, input: &str) -> String {
         let v: Value = serde_json::from_str(input).map_err(|e| format!("请求 JSON 错误: {e}"))?;
         match command {
             "artwork_candidates"=>Ok(artwork::candidates(&v)),
+            "artwork_catalog"=>Ok(artwork::catalog(&v)),
             "profile" => profile(&v["session"]),
             "home" => home(&v["session"]),
             "recommend" => discovery::recommend(&v),

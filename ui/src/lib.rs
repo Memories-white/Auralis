@@ -1,5 +1,6 @@
 //! Auralis' active UI. DOM composition, navigation gestures, modal state and motion
 //! run in Rust/WASM. JavaScript is generated bindings plus a small host bootstrap.
+mod artwork;
 mod customization;
 mod icons;
 mod labels;
@@ -81,7 +82,7 @@ fn b(v: &Value, key: &str) -> bool {
 }
 fn set_html(id: &str, html: &str) {
     if let Some(node) = el(id) {
-        node.set_inner_html(html)
+        artwork::replace(&node, html)
     }
 }
 fn style(node: &Element, key: &str, value: &str) {
@@ -633,6 +634,8 @@ impl App {
         }
     }
     fn paint_content(&mut self) {
+        // Request the restored current-song image before recommendation shelves.
+        self.paint_mini();
         let route = self.route_key();
         let route_changed = route != self.painted_route;
         self.painted_route = route;
