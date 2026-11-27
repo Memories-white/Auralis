@@ -13,6 +13,8 @@
 
 ## 依赖
 
+0.4.4 的设置和底栏参考同一固定 Melox 提交中的主题设置、设置首页及歌词偏好分组，使用 Rust 独立实现功能和视觉；不复制这些 GPL 文件的源码。玻璃效果使用 WebView 普通背景模糊，不声称复现原生液态折射。适配和未适配项目见 [交接表](HANDOFF.md)。
+
 ### 0.4.1 歌词动效移植
 
 Melox 根目录声明 GPL-3.0，但 `LyricRowMotion.kt` 与 `LyricsView.kt` 的文件头单独标注 Apache-2.0。本次仅将这两个文件中的逐行运动及焦点 / 模糊规则对应移植到 Rust，保留[来源与修改声明](licenses/Melox-lyrics-NOTICE.md)及[Apache-2.0 许可](licenses/Melox-lyrics-Apache-2.0)。播放页布局继续独立实现；不引入其他 GPL 文件的代码。

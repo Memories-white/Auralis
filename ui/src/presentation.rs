@@ -390,9 +390,48 @@ fn dependent(mut node: Value, enabled: bool) -> Value {
     node
 }
 
+fn customization_page(page: &str, v: &Value) -> Vec<Value> {
+    let groups: &[(&str, &str, &[&str])] = if page == "lyrics-style" {
+        &[
+            (
+                "lyric-type",
+                "排版",
+                &["lyricAlign", "lyricSize", "lyricWeight"],
+            ),
+            (
+                "lyric-effects",
+                "显示与动效",
+                &["lyricBlur", "translation", "lyricScale", "lyricControls"],
+            ),
+        ]
+    } else {
+        &[
+            (
+                "dock",
+                "底栏与材质",
+                &["bar", "compact", "blur", "navLabels"],
+            ),
+            (
+                "cover",
+                "播放界面",
+                &["background", "shape", "titleAlign", "coverFlip"],
+            ),
+            ("list", "歌曲列表", &["artwork", "duration"]),
+            ("motion", "导航动效", &["motion"]),
+        ]
+    };
+    let mut nodes = vec![];
+    for (key, title, keys) in groups {
+        nodes.push(json!({"kind":"section","text":{"value":title}}));
+        nodes.push(group(key, crate::customization::nodes(v, keys)));
+    }
+    nodes.push(json!({"kind":"text","style":"settings-note","text":{"value":"选项即时生效并自动保存。系统关闭动画时，优先遵循系统设置。"}}));
+    nodes
+}
 fn settings(page: &str, v: &Value) -> Vec<Value> {
     let monet = yes(v, "monet");
     match page {
+        "ui-customize" | "lyrics-style" => customization_page(page, v),
         "settings" => {
             let mut nodes = vec![
                 card(
@@ -414,6 +453,16 @@ fn settings(page: &str, v: &Value) -> Vec<Value> {
                             "appearance",
                             tr(appearance(string(v, "colorMode"))),
                             "navigate:appearance",
+                        ),
+                        preference(
+                            "ui_customize",
+                            tr("ui_customize_summary"),
+                            "navigate:ui-customize",
+                        ),
+                        preference(
+                            "lyrics_style",
+                            tr("lyrics_style_summary"),
+                            "navigate:lyrics-style",
                         ),
                         monet_switch(v),
                         dependent(
@@ -639,13 +688,15 @@ pub fn screen(v: &Value) -> Result<Value, String> {
         "songs" => (value(string(v, "detailTitle")), detail(v)),
         "recent" => (tr("recent_plays"), recent(v)),
         "settings" | "appearance" | "quality" | "monet" | "monet-source" | "monet-style"
-        | "monet-spec" | "storage" | "about" => {
+        | "monet-spec" | "storage" | "about" | "ui-customize" | "lyrics-style" => {
             let title = match page {
                 "monet" => "monet_title",
                 "monet-source" => "color_source",
                 "monet-style" => "palette_style",
                 "monet-spec" => "color_spec",
                 "quality" => "audio_quality",
+                "ui-customize" => "ui_customize",
+                "lyrics-style" => "lyrics_style",
                 _ => page,
             };
             (tr(title), settings(page, v))
@@ -692,7 +743,7 @@ mod tests {
         let guest = screen(&json!({"page":"settings"})).unwrap().to_string();
         assert!(!guest.contains("\"action\":\"logout\""));
         let doc = screen(&json!({"page":"settings","loggedIn":true,"monet":false})).unwrap();
-        assert_eq!(doc["nodes"][2]["children"][2]["enabled"], false);
+        assert_eq!(doc["nodes"][2]["children"][4]["enabled"], false);
         assert!(doc.to_string().contains("\"action\":\"logout\""));
     }
     #[test]

@@ -226,4 +226,8 @@
     <string name="playlist_retry_hint">可以重试，或返回选择其他歌单。</string>
     <string name="playlist_invalid">这个入口没有有效的歌单编号，请返回并刷新推荐。</string>
     <string name="playlist_response_invalid">服务未返回有效歌曲列表，请重试。</string>
+    <string name="ui_customize">主题与界面</string>
+    <string name="ui_customize_summary">底栏、封面、列表与动效</string>
+    <string name="lyrics_style">歌词外观</string>
+    <string name="lyrics_style_summary">排版、字号与渐变模糊</string>
 </resources>

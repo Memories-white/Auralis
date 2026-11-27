@@ -25,7 +25,7 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 
 // Native bridge allowlist only; page composition and destinations live in Rust.
-private val SETTINGS_ROUTES=setOf("settings","appearance","monet","monet-source","monet-style","monet-spec","quality","storage","about")
+private val SETTINGS_ROUTES=setOf("settings","appearance","monet","monet-source","monet-style","monet-spec","quality","storage","about","ui-customize","lyrics-style")
 
 /** Only window/theme/system bridges live here. All visible application pages and
  * event/motion logic are compiled from the Rust ui crate into the bundled WASM module. */
@@ -73,6 +73,8 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
     var palette="{}"
     var safeTop=0
     var safeBottom=0
+    private val uiStore=activity.getSharedPreferences("rust-appearance",android.content.Context.MODE_PRIVATE)
+    private var uiPreferences=runCatching{JSONObject(uiStore.getString("value","{}").orEmpty())}.getOrDefault(JSONObject())
     private var ready=false
     private var closed=false
     private var requestedPlayer=false
@@ -148,7 +150,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
         val keys=listOf(m.page,m.home,m.library,m.discoverySongs,m.tracks,m.favorites,m.recentPlays,m.searchResults,m.searchHistory,m.queue,m.profile,m.mid,
             m.loggedIn,m.avatar,m.uin,m.detailTitle,m.detailCover,m.detailLoading,m.detailError,m.status,m.busy,m.discoveryLoading,m.discoveryError,m.discoveryMore,
             m.searchText,m.searchedQuery,m.monetEnabled,m.monetColor,m.monetSource,m.monetStyle,m.monetSpec,m.colorMode,m.audioQuality,m.qualityFallback,
-            m.qrOpen,m.qrBitmap,m.qrStatus,m.lyrics,m.translation,m.collectionBusy,m.collectionMessage,palette,safeTop,safeBottom,cacheBytes)
+            m.qrOpen,m.qrBitmap,m.qrStatus,m.lyrics,m.translation,m.collectionBusy,m.collectionMessage,uiPreferences.toString(),palette,safeTop,safeBottom,cacheBytes)
         if(keys!=contentKeys){
             contentKeys=keys
             if(qr!==m.qrBitmap){qr=m.qrBitmap;qrRevision++}
@@ -161,6 +163,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
                 put("query",m.searchText);put("searchedQuery",m.searchedQuery);put("busy",m.busy);put("status",m.status)
                 put("discoveryLoading",m.discoveryLoading);put("discoveryError",m.discoveryError);put("discoveryMore",m.discoveryMore)
                 put("colorMode",m.colorMode);put("monet",m.monetEnabled);put("monetSource",m.monetSource);put("monetStyle",m.monetStyle);put("monetSpec",m.monetSpec);put("monetColor",m.monetColor)
+                put("uiPreferences",uiPreferences)
                 put("quality",m.audioQuality);put("qualityFallback",m.qualityFallback);put("version",BuildConfig.VERSION_NAME)
                 put("wallpaperSupported",Build.VERSION.SDK_INT>=31);put("artworkAvailable",m.cover.isNotBlank())
                 put("qrOpen",m.qrOpen);put("qrStatus",m.qrStatus);put("qrRevision",qrRevision)
@@ -207,6 +210,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
             "daily"->m.daily();"refresh_home"->if(!m.busy)m.refreshHome();"refresh_library"->if(!m.busy)m.refreshLibrary()
             "retry_playlist"->m.retryPlaylist();"load_more"->m.loadMoreDiscovery();"clear_search"->m.clearSearchHistory();"clear_recent"->m.clearRecentPlays()
             "appearance"->{val value=event.optString("value");if(value in setOf("system","light","dark"))m.setAppearance(value)}
+            "ui_preferences"->{event.optJSONObject("value")?.takeIf{it.toString().length<=4096}?.let{uiPreferences=it;uiStore.edit().putString("value",it.toString()).apply()}}
             "toggle_monet"->m.setMonet(!m.monetEnabled)
             "monet"->{val key=event.optString("key");val value=event.optString("value");if(key in setOf("source","style","spec")||key=="color"&&value.matches(Regex("[0-9A-Fa-f]{6}")))m.setMonetOption(key,value)}
             "quality"->m.chooseAudioQuality(event.optString("value"));"toggle_fallback"->m.allowQualityFallback(!m.qualityFallback)

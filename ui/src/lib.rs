@@ -1,5 +1,6 @@
 //! Auralis' active UI. DOM composition, navigation gestures, modal state and motion
 //! run in Rust/WASM. JavaScript is generated bindings plus a small host bootstrap.
+mod customization;
 mod icons;
 mod labels;
 mod lyric_motion;
@@ -45,6 +46,10 @@ struct App {
     artwork_bounds: [f64; 8],
     last_frame: f64,
     mini_until: f64,
+    cover_flip_until: f64,
+    effect_stamp: i32,
+    ambient_phase: f64,
+    wash_transform: String,
     last_load: f64,
     pointer: Option<(f64, f64, String)>,
     suppress_click: f64,
@@ -282,7 +287,8 @@ pub fn update(input: &str) {
             "content" => {
                 app.save_scroll();
                 app.data = packet["state"].clone();
-                app.reduced = b(&app.data, "reducedMotion");
+                app.reduced = b(&app.data, "reducedMotion")
+                    || customization::get(&app.data, "motion") == "reduced";
                 app.paint_content();
                 if app.player {
                     app.paint_player();
@@ -312,6 +318,7 @@ pub fn update(input: &str) {
                         app.mini_until = now() + 4500.0;
                     }
                     if identity {
+                        app.cover_flip_until = now() + 720.0;
                         app.active_line = None;
                         if matches!(app.sheet.as_str(), "song-actions" | "add-playlist") {
                             app.sheet.clear();
@@ -441,6 +448,20 @@ impl App {
                 let message = labels::label("color_hex_error");
                 if let Some(error) = el("custom-color-error") {
                     error.set_text_content(if valid { None } else { Some(&message) });
+                }
+            }
+            return;
+        }
+        if let Some(rest) = action.strip_prefix("ui:") {
+            if let Some((key, value)) = rest.split_once(':') {
+                if customization::set(&mut self.data, key, value) {
+                    self.reduced = b(&self.data, "reducedMotion")
+                        || customization::get(&self.data, "motion") == "reduced";
+                    post(json!({"type":"ui_preferences","value":self.data["uiPreferences"]}));
+                    self.paint_content();
+                    if self.player {
+                        self.paint_player();
+                    }
                 }
             }
             return;
@@ -647,6 +668,22 @@ impl App {
             }
         }
         if let Some(root) = el("app") {
+            for spec in customization::OPTIONS {
+                let _ = root.set_attribute(
+                    &format!("data-ui-{}", spec.key.to_lowercase()),
+                    customization::get(&self.data, spec.key),
+                );
+            }
+            style(
+                &root,
+                "--lyric-size",
+                &format!("{}px", customization::get(&self.data, "lyricSize")),
+            );
+            style(
+                &root,
+                "--lyric-weight",
+                customization::get(&self.data, "lyricWeight"),
+            );
             style(
                 &root,
                 "--lyric-blur-unit",
@@ -689,6 +726,7 @@ impl App {
         set_html("mini-player", &render::mini(&self.live, &self.data));
     }
     fn paint_player(&mut self) {
+        self.wash_transform.clear();
         let old_scroll = el("lyric-viewport")
             .and_then(|e| e.dyn_into::<HtmlElement>().ok())
             .map(|e| e.scroll_top())
@@ -1045,7 +1083,7 @@ impl App {
         }
     }
     fn frame(&mut self, time: f64) {
-        let expanded = self.mini_until > time;
+        let expanded = self.mini_until > time && customization::get(&self.data, "compact") != "on";
         if expanded != self.mini_expanded {
             if let Some(mini) = el("mini-player") {
                 class(&mini, "expanded", expanded);
@@ -1055,6 +1093,57 @@ impl App {
         let dt = ((time - self.last_frame) / 1000.0).clamp(0.0, 0.1);
         self.last_frame = time;
         self.animate_sheet(dt);
+        if self.player
+            && !self.reduced
+            && b(&self.live, "playing")
+            && customization::get(&self.data, "background") == "flow"
+            && customization::get(&self.data, "blur") == "on"
+        {
+            self.ambient_phase += dt / 14.0;
+        }
+        // Slow ambient visuals are Rust sampled at 30Hz, independent of lyric vsync.
+        if self.player && (time / 33.0) as i32 != self.effect_stamp {
+            self.effect_stamp = (time / 33.0) as i32;
+            let phase = self.ambient_phase;
+            let transform = if customization::get(&self.data, "background") == "flow" {
+                format!(
+                    "translate3d({:.2}px,{:.2}px,0) scale(1.3) rotate({:.2}deg)",
+                    phase.sin() * 24.0,
+                    (phase * 0.7).cos() * 18.0,
+                    phase.sin() * 12.0
+                )
+            } else {
+                "scale(1.15)".into()
+            };
+            if transform != self.wash_transform {
+                if let Ok(Some(wash)) = doc().query_selector(".player-wash") {
+                    style(&wash, "transform", &transform);
+                }
+                self.wash_transform = transform;
+            }
+        }
+        if self.player && self.cover_flip_until > 0.0 {
+            if let Some(cover) = el("cover-art") {
+                let p = ((self.cover_flip_until - time) / 720.0).clamp(0.0, 1.0);
+                let wave = if self.reduced || customization::get(&self.data, "coverFlip") == "off" {
+                    0.0
+                } else {
+                    (p * std::f64::consts::PI).sin()
+                };
+                style(
+                    &cover,
+                    "transform",
+                    &format!(
+                        "perspective(1000px) rotateY({:.2}deg) scale({:.4})",
+                        wave * 15.0,
+                        1.0 - wave * 0.035
+                    ),
+                );
+                if p == 0.0 {
+                    self.cover_flip_until = 0.0;
+                }
+            }
+        }
         if !self.player || self.player_page != 2 {
             return;
         }

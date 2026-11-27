@@ -148,6 +148,10 @@ fn node(v: &Value, data: &Value, live: &Value, parent_enabled: bool) -> String {
     match s(v,"kind"){
         "card"=>format!("<div class=\"card {}\" style=\"{style}--padding:{}px\"{}>{}</div>",if action_id.is_empty(){""}else{"pressable"},v["padding"].as_f64().unwrap_or(20.0),attr(action_id,active),children()),
         "row"=>format!("<div class=row style=\"{style};margin-bottom:{}px\">{}</div>",v["bottom"].as_f64().unwrap_or(0.0),children()),
+        "appearance-option"=>{
+            let key=s(v,"key");
+            format!("<fieldset class=appearance-option><legend>{}</legend><div class=appearance-choices>{}</div></fieldset>",esc(s(v,"title")),v["items"].as_array().map(|items|items.iter().map(|item|format!("<button data-action=\"ui:{}:{}\" aria-pressed=\"{}\" class=\"{}\">{}</button>",esc(key),esc(s(item,"id")),item["id"]==v["selected"],if item["id"]==v["selected"]{"selected"}else{""},esc(s(item,"title")))).collect::<String>()).unwrap_or_default())
+        }
         "column"=>format!("<div class=column style=\"{style}\">{}</div>",children()),
         "text"=>format!("<div class=\"text {}\">{}</div>",esc(s(v,"style")),esc(&text(&v["text"]))),
         "icon"=>format!("<span class=\"tile-icon\">{}</span>",icon(s(v,"icon"))),
@@ -198,7 +202,7 @@ fn node(v: &Value, data: &Value, live: &Value, parent_enabled: bool) -> String {
     }
 }
 fn song_row(song: &Value, id: &str, index: usize, selected: bool) -> String {
-    format!("<button id=\"song-{id}-{index}\" class=\"song-row {}\" data-action=\"song:{id}:{index}\">{}<span><strong>{}</strong><small>{}</small></span>{}</button>",if selected{"selected"}else{""},art(&cover(song),false,""),esc(s(song,"title")),esc(s(song,"artist")),if selected{icon("pause")}else if b(song,"vip"){"<em>VIP</em>".into()}else{String::new()})
+    format!("<button id=\"song-{id}-{index}\" class=\"song-row {}\" data-action=\"song:{id}:{index}\">{}<span><strong>{}</strong><small>{}</small></span><small class=song-duration>{}</small>{}</button>",if selected{"selected"}else{""},art(&cover(song),false,""),esc(s(song,"title")),esc(s(song,"artist")),format_time(n(song,"duration")*1000),if selected{icon("pause")}else if b(song,"vip"){"<em>VIP</em>".into()}else{String::new()})
 }
 fn seek() -> String {
     format!("<div class=seek><input type=range min=0 max=1000 step=1 value=0 data-seek aria-label=\"{}\" /></div>",label("playback_progress"))

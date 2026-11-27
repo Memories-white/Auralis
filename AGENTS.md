@@ -6,3 +6,9 @@
 - CSS may define presentation and compositor properties; Rust owns animation state, progress and timing where custom motion is needed. JavaScript remains generated WASM bindings, bootstrap and test tooling.
 - Preserve upstream per-file license notices and document adaptation scope. Do not assume every file shares a repository's root license.
 - Validate animation trajectories against different frame intervals. Measure actual device callbacks before claiming a refresh rate or smoothness result; browser callbacks are not proof of presented GPU frames.
+
+# Handoff after every change
+
+- After each completed change, update `docs/HANDOFF.md` before delivery. Maintain a table with the request, behavior, exact source entry points, validation evidence, limitations and next action.
+- Record source commit, APK version/hash, installation and publication separately. Never mark untested device behavior or pending work as complete.
+- Preserve user data and existing playback/authentication when testing appearance. Restore temporary device appearance changes and do not publish personal screenshots.

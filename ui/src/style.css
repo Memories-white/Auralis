@@ -1,4 +1,7 @@
 :root {
+  --startup-background:#f6f6f6;
+  --control-shadow:#0002;
+  --modal-scrim:#0006;
   color-scheme:light dark;
   font-family:system-ui,-apple-system,"Noto Sans CJK SC",sans-serif;
   font-synthesis:none;
@@ -12,7 +15,7 @@
 body {
   margin:0;
   overflow:hidden;
-  background:#f6f6f6
+  background:var(--startup-background)
 }
 button,input {
   font:inherit
@@ -474,7 +477,7 @@ h1 {
   height:23px;
   border-radius:50%;
   background:var(--card);
-  box-shadow:0 1px 3px #0002;
+  box-shadow:0 1px 3px var(--control-shadow);
   transition:transform .3s cubic-bezier(.2,1.1,.3,1)
 }
 .switch.checked {
@@ -1141,7 +1144,7 @@ h1 {
 .modal-backdrop {
   position:absolute;
   inset:0;
-  background:#0006;
+  background:var(--modal-scrim);
   backdrop-filter:blur(4px);
   animation:fade-in .25s
 }
@@ -1512,3 +1515,55 @@ h1 {
 #player .cover-art { opacity:var(--cover-opacity,1); }
 #shared-artwork { position:fixed;top:0;left:0;z-index:6;pointer-events:none;transform-origin:0 0;will-change:transform;overflow:hidden;border-radius:12px; }
 #shared-artwork .artwork { width:100%;height:100%; }
+
+/* Appearance uses the native semantic palette in both light and dark modes. */
+#app { --mi-primary:var(--primary); --mi-on-primary:var(--on-primary); --mi-surface:var(--card); --mi-on-surface:var(--fg); --mi-background:var(--bg); --mi-outline:var(--border); --settings-radius:20px; --settings-gap:12px; --choice-radius:12px; --lyric-size:28px; --lyric-weight:700; }
+#app[data-route="settings"] .section h2,
+#app[data-route="ui-customize"] .section h2,
+#app[data-route="lyrics-style"] .section h2 { font-size:13px; font-weight:550; color:var(--muted); letter-spacing:0; }
+#app[data-route="settings"] .card,
+#app[data-route="ui-customize"] .card,
+#app[data-route="lyrics-style"] .card { border-radius:var(--settings-radius); }
+#app[data-route="settings"] .preference { min-height:76px; padding:16px 20px; }
+#app[data-route="settings"] .preference strong { font-size:16px; font-weight:600; }
+#app[data-route="settings"] .preference small { font-size:12px; line-height:1.55; margin-top:5px; }
+.appearance-option { border:0; margin:0; min-width:0; padding:18px 20px; }
+.appearance-option + .appearance-option { border-top:1px solid color-mix(in srgb,var(--border) 55%,transparent); }
+.appearance-option legend { float:left; width:100%; padding:0; margin-bottom:12px; font-size:16px; font-weight:600; }
+.appearance-choices { clear:both; display:flex; flex-wrap:wrap; gap:8px; }
+.appearance-choices button { flex:1 1 auto; min-height:48px; padding:12px 14px; border-radius:var(--choice-radius); background:var(--bg); color:var(--muted); font-size:13px; line-height:1.45; overflow-wrap:anywhere; }
+.appearance-choices button.selected { background:color-mix(in srgb,var(--mi-primary) 14%,var(--mi-surface)); color:var(--mi-primary); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--mi-primary) 35%,transparent); font-weight:650; }
+.appearance-choices button:active { transform:scale(.97); }
+.settings-note { margin:12px 28px 28px; color:var(--muted); font-size:12px; line-height:1.7; }
+#app[data-ui-bar="glass"] #navigation,
+#app[data-ui-bar="glass"] .mini { background:color-mix(in srgb,var(--card) 85%,transparent); border:1px solid color-mix(in srgb,var(--border) 70%,transparent); backdrop-filter:blur(20px) saturate(1.25); }
+#app[data-ui-bar="normal"] #navigation { border-radius:0; background:transparent; box-shadow:none; }
+#app[data-ui-bar="normal"] .nav-item.selected { background:transparent; }
+#app[data-ui-bar="normal"] .mini { border-radius:20px; }
+#app[data-ui-bar="floating"] #navigation { margin:0 18px; border:1px solid var(--border); }
+#app[data-ui-bar="floating"] .nav-item { flex-direction:row; gap:8px; }
+#app[data-ui-blur="off"] #navigation,
+#app[data-ui-blur="off"] .mini { backdrop-filter:none; background:var(--card); }
+#app[data-ui-navlabels="off"] .nav-item span { display:none; }
+#app[data-ui-background="tonal"] #player { background:radial-gradient(ellipse at 15% 5%,color-mix(in srgb,var(--primary) 25%,var(--bg)),var(--bg) 75%); }
+#app[data-ui-background="plain"] .player-wash,
+#app[data-ui-background="tonal"] .player-wash,
+#app[data-ui-blur="off"] .player-wash { display:none; }
+#app[data-ui-shape="default"] .cover-art,
+#app[data-ui-shape="default"] .cover-art .artwork { border-radius:8px; }
+#app[data-ui-shape="rounded"] .cover-art,
+#app[data-ui-shape="rounded"] .cover-art .artwork { border-radius:28px; }
+#app[data-ui-shape="circle"] .cover-art,
+#app[data-ui-shape="circle"] .cover-art .artwork { border-radius:50%; }
+#app[data-ui-titlealign="center"] .player-identity { justify-content:center; text-align:center; }
+#app[data-ui-artwork="off"] .song-row > .artwork { display:none; }
+.song-duration { display:none; flex:none; font-size:12px; font-variant-numeric:tabular-nums; color:var(--muted); }
+#app[data-ui-duration="on"] .song-duration { display:block; }
+.lyric-line strong { font-size:var(--lyric-size); font-weight:var(--lyric-weight); }
+#app[data-ui-lyricalign="center"] .lyric-line { text-align:center; transform-origin:center; }
+#app[data-ui-lyricblur="off"] .lyric-line { filter:none; }
+#app[data-ui-translation="off"] .lyric-line small { display:none; }
+#app[data-ui-lyricscale="off"] .lyric-line.active { transform:scale(1); }
+#app[data-ui-background="flow"] .player-wash { opacity:.32; will-change:transform; }
+#app[data-ui-lyriccontrols="off"] .lyrics-page .player-footer .transport { display:none; }
+@media(min-width:700px) { #app[data-ui-bar="floating"] #navigation { margin:0; } #app[data-ui-bar="normal"] #navigation { border-radius:20px; } }
