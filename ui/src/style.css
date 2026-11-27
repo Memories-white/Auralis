@@ -1382,9 +1382,10 @@ h1 {
 }
 .qr-content img {
   width:220px;
-  height:220px;
-  max-height:35vh;
-  max-width:65vw;
+  max-width:100%;
+  height:auto;
+  aspect-ratio:1;
+  flex:none;
   object-fit:contain;
   border-radius:12px;
   background:#fff

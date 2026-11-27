@@ -80,8 +80,6 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
     private var requestedPlayer=false
     private var contentKeys:List<Any?>?=null
     private var lastPulse=""
-    private var qrRevision=0
-    @Volatile private var qr:Bitmap?=null
     @Volatile private var cacheBytes=0L
     private val worker=Executors.newSingleThreadExecutor()
     init{
@@ -120,7 +118,6 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
                     val bytes=ArtworkCache.loadEncoded(activity,url,avatar)?:return empty()
                     WebResourceResponse("image/webp",null,200,"OK",mapOf("Cache-Control" to "private,max-age=86400"),ByteArrayInputStream(bytes))
                 }
-                "/qr"->{val bitmap=qr?:return empty();val stream=ByteArrayOutputStream();bitmap.compress(Bitmap.CompressFormat.PNG,100,stream);WebResourceResponse("image/png",null,200,"OK",mapOf("Cache-Control" to "no-store"),ByteArrayInputStream(stream.toByteArray()))}
                 else->{
                     val path=uri.path.orEmpty().removePrefix("/")
                     if(path.contains("..")||path.contains('\\'))return empty()
@@ -148,10 +145,9 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
             m.loggedIn,m.avatar,m.uin,m.detailTitle,m.detailCover,m.detailLoading,m.detailError,m.status,m.busy,m.discoveryLoading,m.discoveryError,m.discoveryMore,
             m.detailTotal,m.detailHasMore,m.detailLoadingMore,
             m.searchText,m.searchedQuery,m.monetEnabled,m.monetColor,m.monetSource,m.monetStyle,m.monetSpec,m.colorMode,m.audioQuality,m.qualityFallback,
-            m.qrOpen,m.qrBitmap,m.qrStatus,m.lyrics,m.translation,m.collectionBusy,m.collectionMessage,uiPreferences.toString(),palette,safeTop,safeBottom,cacheBytes)
+            m.qrOpen,m.qrImage,m.qrStatus,m.lyrics,m.translation,m.collectionBusy,m.collectionMessage,uiPreferences.toString(),palette,safeTop,safeBottom,cacheBytes)
         if(keys!=contentKeys){
             contentKeys=keys
-            if(qr!==m.qrBitmap){qr=m.qrBitmap;qrRevision++}
             val artists=m.discoverySongs.map{it.optString("artist")}.filter{it.isNotBlank()}.distinct().take(8)
             val sources=listOf("discovery","tracks","recent","favorites","likes","search","queue","playlists","recommendations")
             val state=JSONObject().apply{
@@ -165,7 +161,7 @@ internal class RustHost(private val activity:MainActivity,private val music:Musi
                 put("uiPreferences",uiPreferences)
                 put("quality",m.audioQuality);put("qualityFallback",m.qualityFallback);put("version",BuildConfig.VERSION_NAME)
                 put("wallpaperSupported",Build.VERSION.SDK_INT>=31);put("artworkAvailable",m.cover.isNotBlank())
-                put("qrOpen",m.qrOpen);put("qrStatus",m.qrStatus);put("qrRevision",qrRevision)
+                put("qrOpen",m.qrOpen);put("qrStatus",m.qrStatus);put("qrImage",m.qrImage)
                 put("lyrics",m.lyrics);put("translation",m.translation);put("collectionBusy",m.collectionBusy);put("collectionMessage",m.collectionMessage)
                 put("currentSong",m.currentSong()?.let(::clean)?:JSONObject())
                 put("history",JSONArray(m.searchHistory));put("artists",JSONArray(artists));put("colors",JSONObject(palette));put("safeTop",safeTop);put("safeBottom",safeBottom);put("cacheBytes",cacheBytes)

@@ -26,7 +26,7 @@ data.counts = Object.fromEntries(['discovery', 'tracks', 'recent', 'favorites', 
 const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, cover: rows[1].coverUrl, position: 1000, duration: 180000, playing: false, mode: 'ORDER', actualQuality: 'hq', favorite: false, sleepRemaining: 0, sleepAfterTrack: false, sleepMinutes: 0 };
 
 (async () => {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE });
   try {
     const page = await browser.newPage({ viewport: { width: 411, height: 914 }, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
     const errors = [];
@@ -34,8 +34,13 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
     await page.addInitScript(() => { window.__actions = []; window.AuralisNative = { postMessage: value => window.__actions.push(JSON.parse(value)) }; });
+    let qrRequests = 0;
     await page.route('https://auralis.local/**', async route => {
       const uri = new URL(route.request().url());
+      if (uri.pathname === '/qr') {
+        qrRequests++;
+        return route.fulfill({ status: 404, contentType: 'text/plain', body: '' });
+      }
       if (uri.pathname === '/artwork') {
         const key = uri.searchParams.get('url');
         artworkRequests.set(key, (artworkRequests.get(key) || 0) + 1);
@@ -53,6 +58,28 @@ const live = { mid: rows[1].mid, title: rows[1].title, artist: rows[1].artist, c
     await page.waitForFunction(() => typeof window.auralisUpdate === 'function');
     const content = async () => page.evaluate(input => window.auralisUpdate(JSON.stringify({ type: 'content', state: input })), data);
     const pulse = async () => page.evaluate(input => window.auralisUpdate(JSON.stringify({ type: 'playback', state: input })), live);
+    const qrFixture = await page.evaluate(() => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 296;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, 296, 296);
+      ctx.fillStyle = 'black';
+      ctx.fillRect(32, 32, 232, 232);
+      return canvas.toDataURL('image/png').split(',')[1];
+    });
+    Object.assign(data, { qrOpen: true, qrStatus: '等待扫码', qrImage: qrFixture });
+    await content();
+    await page.waitForFunction(() => document.querySelector('.qr-content img')?.complete, null, { timeout: 2500 });
+    assert.equal(await page.locator('.qr-content img').evaluate(img => img.naturalWidth), 296, 'Waiting for scan must display a readable image');
+    const qrSize = await page.locator('.qr-content img').boundingBox();
+    assert.ok(qrSize && qrSize.width >= 100 && Math.abs(qrSize.width - qrSize.height) < 1,
+      `The QR image must occupy a visible square, got ${JSON.stringify(qrSize)}`);
+    assert.equal(qrRequests, 0, 'The login QR image must load even when the WebView image route is unavailable');
+    Object.assign(data, { qrStatus: '正在获取二维码', qrImage: '' });
+    await content();
+    assert.equal(await page.locator('.qr-content img').count(), 0, 'Refreshing must remove the previous QR image');
+    data.qrOpen = false;
     await content(); await pulse();
     await page.waitForFunction(() => [...document.querySelectorAll('#content img[data-art-src]')].every(img => img.complete && img.naturalWidth > 0));
     const coverRequestsAtBoot = new Map(artworkRequests);

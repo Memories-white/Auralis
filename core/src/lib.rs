@@ -132,6 +132,13 @@ fn qr_poll(sig: &str) -> Result<Value, String> {
         .body_mut()
         .read_to_string()
         .map_err(|e| e.to_string())?;
+    parse_qr_poll(&body, |redirect| exchange_login(redirect, sig))
+}
+
+fn parse_qr_poll(
+    body: &str,
+    exchange: impl FnOnce(&str) -> Result<Value, String>,
+) -> Result<Value, String> {
     let parts: Vec<String> = body
         .split('\'')
         .skip(1)
@@ -147,7 +154,11 @@ fn qr_poll(sig: &str) -> Result<Value, String> {
         "65" => Ok(json!({"status":"expired"})),
         "68" => Ok(json!({"status":"canceled"})),
         "0" => {
-            let mut session = exchange_login(&parts[2], sig)?;
+            // QQ has already confirmed this QR code. Report exchange errors without polling it again.
+            let mut session = match exchange(&parts[2]) {
+                Ok(session) => session,
+                Err(error) => return Ok(json!({"status":"failed","error":error})),
+            };
             if let Some(nickname) = parts.get(5) {
                 session["nickname"] = json!(nickname);
             }
@@ -156,18 +167,34 @@ fn qr_poll(sig: &str) -> Result<Value, String> {
         _ => Err(format!("QQ 登录失败: {}", parts[4])),
     }
 }
+
+fn login_request<T>(mut request: impl FnMut() -> Result<T, String>) -> Result<T, String> {
+    // Android reports DNS failures before the request is sent. Other failures can follow a
+    // consumed authorization code or redirect, so do not repeat those requests.
+    for delay_ms in [2_000, 4_000] {
+        match request() {
+            Err(error) if error.starts_with("无法解析 ") => {
+                std::thread::sleep(Duration::from_millis(delay_ms));
+            }
+            result => return result,
+        }
+    }
+    request()
+}
+
 fn exchange_login(redirect: &str, sig: &str) -> Result<Value, String> {
     if !redirect.starts_with("https://") {
         return Err("QQ 返回非 HTTPS 登录地址".into());
     }
     let http = client();
     let mut cookies = serde_json::Map::new();
-    let first = http
-        .get(redirect)
-        .header(COOKIE, format!("qrsig={sig};"))
-        .header(USER_AGENT, AGENT)
-        .call()
-        .map_err(|e| e.to_string())?;
+    let first = login_request(|| {
+        http.get(redirect)
+            .header(COOKIE, format!("qrsig={sig};"))
+            .header(USER_AGENT, AGENT)
+            .call()
+            .map_err(|e| e.to_string())
+    })?;
     collect_cookies(first.headers(), &mut cookies);
     if let Some(loc) = first
         .headers()
@@ -177,12 +204,13 @@ fn exchange_login(redirect: &str, sig: &str) -> Result<Value, String> {
         if (loc.starts_with("https://graph.qq.com/") || loc.starts_with("https://y.qq.com/"))
             && !loc.contains('@')
         {
-            let second = http
-                .get(loc)
-                .header(COOKIE, cookie_header(&Value::Object(cookies.clone())))
-                .header(USER_AGENT, AGENT)
-                .call()
-                .map_err(|e| e.to_string())?;
+            let second = login_request(|| {
+                http.get(loc)
+                    .header(COOKIE, cookie_header(&Value::Object(cookies.clone())))
+                    .header(USER_AGENT, AGENT)
+                    .call()
+                    .map_err(|e| e.to_string())
+            })?;
             collect_cookies(second.headers(), &mut cookies);
         }
     }
@@ -208,12 +236,13 @@ fn exchange_login(redirect: &str, sig: &str) -> Result<Value, String> {
         ("openapi", "8090_1010_1030_1050".into()),
         ("g_tk", gtk(&skey).to_string()),
     ]);
-    let auth = http
-        .post("https://graph.qq.com/oauth2.0/authorize")
-        .header(COOKIE, cookie_header(&Value::Object(cookies.clone())))
-        .header(USER_AGENT, AGENT)
-        .send_form(&form)
-        .map_err(|e| e.to_string())?;
+    let auth = login_request(|| {
+        http.post("https://graph.qq.com/oauth2.0/authorize")
+            .header(COOKIE, cookie_header(&Value::Object(cookies.clone())))
+            .header(USER_AGENT, AGENT)
+            .send_form(&form)
+            .map_err(|e| e.to_string())
+    })?;
     let location = auth
         .headers()
         .get("location")
@@ -224,11 +253,13 @@ fn exchange_login(redirect: &str, sig: &str) -> Result<Value, String> {
     let code = extract_code(&location)
         .or_else(|| extract_code(&body))
         .ok_or("QQ OAuth 未返回 code")?;
-    let login = gateway(
-        json!({"comm":{"ct":19,"cv":1,"tmeLoginType":"1"},
-        "login":{"module":"QQConnectLogin.LoginServer","method":"QQLogin","param":{"onlyNeedAccessToken":0,"forceRefreshToken":0,"appid":100497308,"code":code}}}),
-        &Value::Null,
-    )?;
+    let login = login_request(|| {
+        gateway(
+            json!({"comm":{"ct":19,"cv":1,"tmeLoginType":"1"},
+            "login":{"module":"QQConnectLogin.LoginServer","method":"QQLogin","param":{"onlyNeedAccessToken":0,"forceRefreshToken":0,"appid":100497308,"code":code}}}),
+            &Value::Null,
+        )
+    })?;
     let data = &login["login"]["data"];
     let key = field(data, "musickey");
     if key.is_empty() {
@@ -872,6 +903,55 @@ mod tests {
     fn tokens_are_stable() {
         assert_eq!(ptqr_token("abc"), 108966);
         assert_eq!(gtk("abc"), 193485963);
+    }
+    #[test]
+    fn confirmed_qr_does_not_return_to_polling_after_exchange_dns_failure() {
+        let redirect = "https://ssl.ptlogin2.graph.qq.com/check_sig";
+        let error = "无法解析 ssl.ptlogin2.graph.qq.com（Android 网络），请检查当前网络后重试";
+        let callback = format!("ptuiCB('0','0','{redirect}','0','登录成功','测试用户');");
+        let result = parse_qr_poll(&callback, |url| {
+            assert_eq!(url, redirect);
+            Err(error.into())
+        })
+        .expect("a confirmed QR code must not be polled again");
+        assert_eq!(result, json!({"status":"failed","error":error}));
+    }
+    #[test]
+    fn confirmed_qr_retries_the_same_step_and_preserves_the_session() {
+        let redirect = "https://ssl.ptlogin2.graph.qq.com/check_sig";
+        let callback = format!("ptuiCB('0','0','{redirect}','0','登录成功','测试用户');");
+        let mut requests = 0;
+        let result = parse_qr_poll(&callback, |url| {
+            login_request(|| {
+                assert_eq!(url, redirect);
+                requests += 1;
+                if requests == 1 {
+                    Err("无法解析 ssl.ptlogin2.graph.qq.com（Android 网络），请检查当前网络后重试".into())
+                } else {
+                    Ok(json!({"uin":"fixture-id","musicKey":"fixture-key"}))
+                }
+            })
+        })
+        .unwrap();
+        assert_eq!(result["status"], "success");
+        assert_eq!(result["session"]["musicKey"], "fixture-key");
+        assert_eq!(result["session"]["nickname"], "测试用户");
+        assert_eq!(requests, 2);
+    }
+    #[test]
+    fn login_request_retries_only_dns_and_stops_after_three_attempts() {
+        for (error, expected_attempts) in [
+            ("无法解析 graph.qq.com（Android 网络），请检查当前网络后重试", 3),
+            ("连接 graph.qq.com 超时，请重试", 1),
+        ] {
+            let mut attempts = 0;
+            let result = login_request::<()>(|| {
+                attempts += 1;
+                Err(error.into())
+            });
+            assert_eq!(result, Err(error.into()));
+            assert_eq!(attempts, expected_attempts);
+        }
     }
     #[test]
     fn song_shape() {
