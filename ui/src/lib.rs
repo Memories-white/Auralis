@@ -26,9 +26,25 @@ struct CoverMorph {
     radius_to: f64,
 }
 
+/// Endpoints and page box for the shared player container. Measured in one batch
+/// when a transition starts (never per frame), then interpolated in `motion`.
+#[derive(Clone, Copy)]
+struct SheetGeometry {
+    /// Song bar rect `[x, y, w, h]` the card grows out of and returns to.
+    from: [f64; 4],
+    /// Window rect `[0, 0, w, h]` the card fills when open.
+    to: [f64; 4],
+    /// Unscaled layout box of `.player-safe`; the page keeps this size forever.
+    page: [f64; 2],
+    /// Song bar corner radius, interpolated to the window corner radius.
+    radius: f64,
+}
+
 #[derive(Clone)]
 struct SheetLayers {
     player: Element,
+    /// Fixed window-sized box that carries the card clip.
+    sheet: Element,
     surface: Element,
     content: Element,
     cover: Element,
@@ -39,7 +55,6 @@ struct SheetLayers {
     overlay: Option<Element>,
     width: f64,
     height: f64,
-    content_rows: Vec<(Element, f64)>,
 }
 
 #[derive(Clone)]
@@ -103,9 +118,13 @@ struct App {
     sheet_spring: motion::Spring,
     morph: Option<CoverMorph>,
     sheet_layers: Option<SheetLayers>,
+    sheet_geometry: Option<SheetGeometry>,
+    /// Page layout box currently written to the DOM (avoids per-frame style churn).
+    sheet_page_box: [f64; 2],
+    sheet_dock_above: bool,
+    sheet_dock_inert: Option<bool>,
+    sheet_interactive: bool,
     lyrics_mounted: bool,
-    sheet_bounds: [f64; 4],
-    sheet_radius: f64,
     pager: motion::Spring,
     pager_layer: Option<Element>,
     pager_panes: Vec<Element>,
@@ -539,7 +558,10 @@ pub fn start() -> Result<(), JsValue> {
             let target = if app.player { 1.0 } else { 0.0 };
             app.sheet_spring.place(target);
             app.sheet_spring.to(target);
-            app.cache_sheet_layers();
+            // A resize invalidates every measured endpoint, so re-measure once and
+            // paint the endpoint pose; the page box follows the new viewport.
+            app.sheet_geometry = None;
+            app.measure_sheet();
             app.apply_sheet(target);
             app.lyric_dirty = true;
         });
@@ -1283,8 +1305,9 @@ impl App {
         self.mini_lines = parse_lrc(s(&self.data, "lyrics"));
         set_html("mini-player", &render::mini(&self.live, &self.data));
         self.paint_mini_pose();
+        // `#mini-player` itself survives the markup swap, so the cached handles stay
+        // valid and a playback pulse never has to re-query or re-measure the sheet.
         if self.sheet_layers.is_some() {
-            self.cache_sheet_layers();
             self.apply_sheet(self.sheet_spring.position);
         }
     }
@@ -1327,7 +1350,9 @@ impl App {
         );
         if self.player_markup == html && !document_changed && !layout_changed {
             self.show_player_page();
-            self.cache_sheet_layers();
+            if self.sheet_layers.is_none() {
+                self.cache_sheet_layers();
+            }
             self.apply_sheet(self.sheet_spring.position);
             self.paint_progress();
             return;
@@ -1372,6 +1397,11 @@ impl App {
         } else {
             self.wash_transform.clear();
             set_html("player", &html);
+            // The player subtree was replaced: drop the stale element handles. The
+            // measured endpoints stay valid (the layout boxes are unchanged) and
+            // `apply_sheet` rewrites the page box below, so an open player does not
+            // go blank when the track or the layout changes.
+            self.sheet_layers = None;
         }
         self.player_markup = html;
         self.player_identity = player_identity;
@@ -1389,7 +1419,9 @@ impl App {
             }
         }
         self.show_player_page();
-        self.cache_sheet_layers();
+        if self.sheet_layers.is_none() {
+            self.cache_sheet_layers();
+        }
         self.apply_sheet(self.sheet_spring.position);
         self.paint_progress();
         self.sync_lyrics();
@@ -1500,11 +1532,15 @@ impl App {
         self.lyric_dirty = true;
         self.sync_lyrics();
     }
+    /// Cache the element handles used per animation frame. This is a pure DOM
+    /// lookup pass: no layout is read here, so it is safe to run when the player
+    /// markup is replaced but never needs to run on a playback pulse.
     fn cache_sheet_layers(&mut self) {
         let (width, height) = viewport();
         self.sheet_layers = (|| {
             Some(SheetLayers {
                 player: el("player")?,
+                sheet: el("player-sheet")?,
                 surface: el("player-surface")?,
                 content: find("#player .player-safe")?,
                 cover: el("cover-art")?,
@@ -1519,20 +1555,6 @@ impl App {
                 overlay: el("shared-artwork"),
                 width,
                 height,
-                content_rows: [
-                    ".player-toolbar",
-                    ".player-identity",
-                    ".player-pages",
-                    ".page-dots",
-                    ".player-footer",
-                ]
-                .iter()
-                .filter_map(|selector| {
-                    let row = find(&format!("#player .player-safe > {selector}"))?;
-                    let y = row.dyn_ref::<HtmlElement>()?.offset_top() as f64;
-                    Some((row, y))
-                })
-                .collect(),
             })
         })();
     }
@@ -1771,30 +1793,146 @@ impl App {
         style(&cover, "width", &format!("{side}px"));
         style(&cover, "height", &format!("{side}px"));
     }
-    /// Measure the shared element endpoints. The cover is measured after the player
-    /// page has been laid out, so both ends come from real layout boxes; the radius
-    /// comes from computed styles, which is why a circular cover morphs correctly.
-    fn measure_morph(&mut self) -> Option<CoverMorph> {
-        let mini = el("mini-player")?;
-        self.sheet_bounds = rect(&mini);
-        self.sheet_radius = corner_radius(&mini, self.sheet_bounds[2].min(self.sheet_bounds[3]));
-        let mini_art = mini.query_selector(".mini-art").ok().flatten()?;
-        let cover = if self.player_page == 2 {
-            find("#player .identity-art")?
+    /// Write the card pose with DIRECT property writes on the three elements that use
+    /// it.
+    ///
+    /// The container box never changes size: the card is a rounded `clip-path` inset on
+    /// a fixed window box, and the page is moved by one transform. Inline properties are
+    /// deliberately used instead of inherited custom properties: an inherited custom
+    /// property invalidates style for the whole player subtree on every frame, which
+    /// measured worse (style recalc 10ms -> 31ms) than the layout it saved.
+    #[allow(clippy::too_many_arguments)]
+    fn write_sheet_pose(
+        &mut self,
+        layers: &SheetLayers,
+        left: f64,
+        top: f64,
+        width: f64,
+        height: f64,
+        radius: f64,
+        scale: f64,
+        card_alpha: f64,
+        page_alpha: f64,
+        interactive: bool,
+    ) {
+        let right = (layers.width - left - width).max(0.0);
+        let bottom = (layers.height - top - height).max(0.0);
+        style(
+            &layers.sheet,
+            "clip-path",
+            &format!("inset({top:.3}px {right:.3}px {bottom:.3}px {left:.3}px round {radius:.2}px)"),
+        );
+        style(
+            &layers.content,
+            "transform",
+            &format!("translate3d({left:.3}px,{top:.3}px,0) scale({scale:.6})"),
+        );
+        style(&layers.content, "opacity", &format!("{page_alpha:.4}"));
+        style(&layers.surface, "opacity", &format!("{card_alpha:.4}"));
+        if self.sheet_interactive != interactive {
+            style(
+                &layers.player,
+                "pointer-events",
+                if interactive { "auto" } else { "none" },
+            );
+            self.sheet_interactive = interactive;
+        }
+    }
+    /// Restore the plain, settled pose: no clip, no transform, opaque card and page.
+    /// This is what keeps text crisp and the layer tree cheap once the sheet lands.
+    /// It also re-asserts pointer events, because a closing frame leaves the inline
+    /// `pointer-events:none` behind and a cached dedupe must not then skip the write
+    /// on the next open (a warm reopen would be unclickable).
+    fn settle_sheet_pose(&mut self, layers: &SheetLayers) {
+        style(&layers.sheet, "clip-path", "none");
+        style(&layers.content, "transform", "none");
+        style(&layers.content, "opacity", "1");
+        style(&layers.surface, "opacity", "1");
+        if !self.sheet_interactive {
+            style(&layers.player, "pointer-events", "auto");
+            self.sheet_interactive = true;
+        }
+    }
+    /// Measure every endpoint of the shared container and the shared cover in one
+    /// batch: a pose reset, a single layout flush, then all reads. This runs once per
+    /// transition, never per frame.
+    fn measure_sheet(&mut self) -> Option<CoverMorph> {
+        self.cache_sheet_layers();
+        let layers = self.sheet_layers.clone()?;
+        let (width, height) = (layers.width.max(1.0), layers.height.max(1.0));
+        // The page keeps its final layout box for the whole transition. Writing it
+        // once here is what lets the scale be uniform and the sections stay put.
+        style(&layers.content, "width", &format!("{width}px"));
+        style(&layers.content, "height", &format!("{height}px"));
+        // Settled-open pose: the card is the window, the page unscaled. The sheet box
+        // itself is fixed, so this writes no geometry at all.
+        self.settle_sheet_pose(&layers);
+        class(&layers.player, "sheet-morphing", false);
+        // `#mini-player` carries a CSS transition for its press feedback. If that
+        // transition is live, clearing the transform above only *starts* a 240 ms ease
+        // and the read below would return the old position (at the end of an open the
+        // bar sits translated at the card origin). Suspend it for the transition.
+        style(&layers.mini, "transition", "none");
+        style(&layers.mini, "transform", "none");
+        style(&layers.mini, "opacity", "1");
+        // One forced layout for the whole group: this read flushes the writes above, so
+        // every endpoint below is the settled layout box and not a transitioned one.
+        let bar = rect(&layers.mini);
+        let bar_radius = corner_radius(&layers.mini, bar[2].min(bar[3]));
+        let mini_art = layers.mini.query_selector(".mini-art").ok().flatten();
+        let art_from = mini_art.as_ref().map(|node| {
+            let box_ = rect(node);
+            (box_, corner_radius(node, box_[2].min(box_[3])))
+        });
+        let target = if self.player_page == 2 {
+            find("#player .identity-art")
         } else {
-            el("cover-art")?
+            Some(layers.cover.clone())
         };
-        let from = rect(&mini_art);
-        let to = rect(&cover);
+        let art_to = target.as_ref().map(|node| {
+            let box_ = rect(node);
+            (box_, corner_radius(node, box_[2].min(box_[3])))
+        });
+        self.sheet_geometry = Some(SheetGeometry {
+            from: bar,
+            to: [0.0, 0.0, width, height],
+            page: [width, height],
+            radius: bar_radius,
+        });
+        let ((from, radius_from), (to, radius_to)) = (art_from?, art_to?);
         if from[2] < 2.0 || from[3] < 2.0 || to[2] < 2.0 || to[3] < 2.0 {
             return None;
         }
         Some(CoverMorph {
             from,
             to,
-            radius_from: corner_radius(&mini_art, from[2].min(from[3])),
-            radius_to: corner_radius(&cover, to[2].min(to[3])),
+            radius_from,
+            radius_to,
         })
+    }
+    /// Restore the resting, closed pose so nothing from the handoff leaks into the
+    /// song bar after the card has landed.
+    fn finish_sheet_close(&mut self) {
+        if let Some(layers) = self.sheet_layers.clone() {
+            style(&layers.mini, "transform", "none");
+            style(&layers.mini, "opacity", "1");
+            style(&layers.nav, "opacity", "1");
+            style(&layers.nav, "transform", "none");
+            style(&layers.sheet, "clip-path", "none");
+            style(&layers.content, "transform", "none");
+            style(&layers.content, "opacity", "0");
+            style(&layers.surface, "opacity", "0");
+            style(&layers.dock, "z-index", "2");
+            class(&layers.mini, "sharing-artwork", false);
+            let _ = layers.dock.remove_attribute("inert");
+            self.sheet_dock_above = false;
+            self.sheet_dock_inert = Some(false);
+            self.sheet_page_box = [0.0, 0.0];
+            if let Some(mini) = layers.mini.dyn_ref::<HtmlElement>() {
+                let _ = mini.style().remove_property("transition");
+            }
+        }
+        self.sheet_geometry = None;
     }
     fn mount_morph(&self) {
         if let Some(old) = el("shared-artwork") {
@@ -1837,14 +1975,16 @@ impl App {
     }
     fn begin_sheet(&mut self, open: bool) {
         self.player = open;
+        // Interrupting a live transition only retargets the spring. Re-measuring or
+        // re-mounting here would restart the motion from a different pose, which is
+        // exactly the jump a rapid close/open used to show.
         if !self.reduced && !self.sheet_spring.settled() {
             self.sheet_spring.to(if open { 1.0 } else { 0.0 });
             self.apply_sheet(self.sheet_spring.position);
             return;
         }
-        if let Some(content) = find("#player .player-safe") {
-            style(&content, "transform", "none");
-        }
+        // Collapse any expanded bar first so a closing card lands on the bar the
+        // user will actually see, then measure that bar as the source rect.
         if !open {
             self.mini_until = 0.0;
             self.mini.place(0.0);
@@ -1857,17 +1997,8 @@ impl App {
             }
             self.paint_mini_pose();
         }
-        if let Some(layers) = self.sheet_layers.as_ref() {
-            for (row, _) in &layers.content_rows {
-                style(row, "transform", "none");
-            }
-        }
-        self.morph = if self.reduced {
-            None
-        } else {
-            self.measure_morph()
-        };
-        self.cache_sheet_layers();
+        let measured = self.measure_sheet();
+        self.morph = if self.reduced { None } else { measured };
         if self.reduced {
             let target = if open { 1.0 } else { 0.0 };
             self.sheet_spring.place(target);
@@ -1883,6 +2014,8 @@ impl App {
             if let Some(layers) = self.sheet_layers.as_mut() {
                 layers.overlay = el("shared-artwork");
             }
+        } else {
+            self.unmount_morph();
         }
         self.sheet_spring.to(if open { 1.0 } else { 0.0 });
         // Paint the first morph frame now so no unstyled overlay is ever shown.
@@ -1938,110 +2071,125 @@ impl App {
         }
         self.begin_sheet(false);
     }
-    /// Apply the player sheet and the shared artwork for a progress value in `0..=1`.
-    /// `0` is exactly the mini player card and `1` the full window, so every frame is
-    /// a continuous morph where the shared cover's corner radius is interpolated in
-    /// screen pixels instead of being switched by a class at the end.
+    /// Apply the shared container, the rigid page and the shared cover for a
+    /// progress value in `0..=1`.
+    ///
+    /// `0` is exactly the song bar rect and `1` the window, so every frame is one
+    /// continuous morph. All geometry is derived from endpoints measured at the
+    /// start of the transition: this function only writes style and never reads
+    /// layout, so a playback pulse cannot re-layout the page.
     fn apply_sheet(&mut self, p: f64) {
         let Some(layers) = self.sheet_layers.clone() else {
             return;
         };
+        let Some(geometry) = self.sheet_geometry else {
+            return;
+        };
         let p = p.clamp(0.0, 1.0);
-        let q = 1.0 - p;
         let blend = motion::sheet_blend(p);
-        let [x, y, mw, mh] = self.sheet_bounds;
-        let sx = (mw + (layers.width - mw) * p) / layers.width.max(1.0);
-        let sy = (mh + (layers.height - mh) * p) / layers.height.max(1.0);
-        style(
-            &layers.surface,
-            "transform",
-            &format!(
-                "translate3d({:.3}px,{:.3}px,0) scale({:.6},{:.6})",
-                x * q,
-                y * q,
-                sx,
-                sy
-            ),
-        );
-        let r = self.sheet_radius * q;
-        style(
-            &layers.surface,
-            "border-radius",
-            &format!("{}px / {}px", r / sx.max(0.001), r / sy.max(0.001)),
-        );
-        style(&layers.surface, "opacity", &blend.background.to_string());
-        style(&layers.content, "opacity", &blend.content.to_string());
-        // Move each section with the expanding container's vertical geometry,
-        // while preserving text/control proportions. No delayed control reveal.
-        for (row, top) in &layers.content_rows {
-            style(
-                row,
-                "transform",
-                &format!("translate3d(0,{:.3}px,0)", top * (sy / sx.max(0.001) - 1.0)),
+        let card = motion::sheet_rect(geometry.from, geometry.to, p);
+        let scale = motion::sheet_scale(card[2], geometry.page[0]);
+        let radius = geometry.radius * (1.0 - p);
+        // The bar rides the card's top-left corner, so the card reads as growing out
+        // of the bar instead of replacing it with a separate full-screen veil.
+        // The sheet is positioned by the absolute card origin; the bar starts on the
+        // bar rect, so it only needs the delta between the two.
+        let card_x = card[0];
+        let card_y = card[1];
+        let bar_dx = card[0] - geometry.from[0];
+        let bar_dy = card[1] - geometry.from[1];
+        let settled = self.sheet_spring.settled();
+        let done_open = self.player && p >= 0.9995;
+        let done_closed = !self.player && p <= 0.0005 && settled;
+
+        // The card is a fixed window box with a rounded clip; the page is moved by one
+        // transform. Neither changes a layout box, so this frame costs no layout.
+        if done_open {
+            self.settle_sheet_pose(&layers);
+        } else {
+            self.write_sheet_pose(
+                &layers,
+                card_x,
+                card_y,
+                card[2],
+                card[3],
+                radius,
+                scale,
+                blend.card,
+                blend.page,
+                self.player || p > 0.2,
             );
         }
-        style(
-            &layers.content,
-            "transform",
-            &format!(
-                "translate3d({:.3}px,{:.3}px,0) scale({:.6})",
-                x * q,
-                y * q,
-                sx
-            ),
-        );
-        style(&layers.mini, "opacity", &blend.mini.to_string());
-        style(&layers.nav, "opacity", &blend.mini.to_string());
-        style(
-            &layers.dock,
-            "z-index",
-            if blend.mini_above { "6" } else { "2" },
-        );
-        if !self.player && p <= 0.2 {
-            let _ = layers.dock.remove_attribute("inert");
-        } else {
-            let _ = layers.dock.set_attribute("inert", "");
+        // Re-assert the page layout box only when it can be stale (first open or a
+        // markup swap). It never changes inside a transition.
+        if self.sheet_page_box != geometry.page {
+            style(&layers.content, "width", &format!("{:.3}px", geometry.page[0]));
+            style(&layers.content, "height", &format!("{:.3}px", geometry.page[1]));
+            self.sheet_page_box = geometry.page;
         }
+        let bar_transform = if p <= 0.0005 {
+            "none".to_string()
+        } else {
+            format!("translate3d({bar_dx:.3}px,{bar_dy:.3}px,0)")
+        };
+        style(&layers.mini, "transform", &bar_transform);
+        style(&layers.mini, "opacity", &format!("{:.4}", blend.bar));
+        style(&layers.nav, "opacity", &format!("{:.4}", blend.bar));
         style(
-            &layers.player,
-            "pointer-events",
-            if self.player || p > 0.2 {
-                "auto"
-            } else {
-                "none"
-            },
+            &layers.nav,
+            "transform",
+            &format!("translate3d(0,{:.2}px,0)", 72.0 * (1.0 - blend.bar)),
         );
+        if self.sheet_dock_above != blend.bar_above {
+            style(
+                &layers.dock,
+                "z-index",
+                if blend.bar_above { "6" } else { "2" },
+            );
+            self.sheet_dock_above = blend.bar_above;
+        }
+        let dock_inert = !(done_closed || (!self.player && p <= 0.2));
+        if self.sheet_dock_inert != Some(dock_inert) {
+            if dock_inert {
+                let _ = layers.dock.set_attribute("inert", "");
+            } else {
+                let _ = layers.dock.remove_attribute("inert");
+            }
+            self.sheet_dock_inert = Some(dock_inert);
+        }
         class(
             &layers.mini,
             "sharing-artwork",
             self.morph.is_some() && p > 0.0 && p < 1.0,
         );
-        style(
-            &layers.nav,
-            "transform",
-            &format!("translate3d(0,{}px,0)", 72.0 * (1.0 - blend.mini)),
-        );
         class(
             &layers.player,
             "mounted",
-            motion::sheet_mounted(self.player, p, self.sheet_spring.settled()),
+            motion::sheet_mounted(self.player, p, settled),
+        );
+        class(
+            &layers.player,
+            "sheet-morphing",
+            !settled || (p > 0.0005 && p < 0.9995),
         );
         let Some(morph) = self.morph else {
             // Reduced motion (or an unmeasurable layout) skips the shared morph but
             // must still reveal the real cover and unmount the closed sheet.
             style(&layers.cover, "opacity", "1");
             style(&layers.artwork, "opacity", "1");
+            if done_closed {
+                self.finish_sheet_close();
+            }
             return;
         };
-        let done = if self.player {
-            p >= 0.9995
-        } else {
-            p <= 0.0005
-        };
+        let done = if self.player { done_open } else { p <= 0.0005 };
         style(&layers.cover, "opacity", if done { "1" } else { "0" });
         style(&layers.artwork, "opacity", if done { "1" } else { "0" });
         if done {
             self.unmount_morph();
+            if done_closed {
+                self.finish_sheet_close();
+            }
             return;
         }
         let horizontal = 1.0 - (1.0 - p).powi(3);
@@ -2059,17 +2207,17 @@ impl App {
         );
         let left = center_x - side / 2.0;
         let top = center_y - side / 2.0;
-        let scale = (side / morph.to[2].max(1.0)).max(0.02);
+        let cover_scale = (side / morph.to[2].max(1.0)).max(0.02);
         // The overlay is scaled from a fixed box, so the CSS radius is divided by the
         // scale to keep the *rendered* radius exactly on the interpolated value.
-        let radius = motion::lerp(morph.radius_from, morph.radius_to, p) / scale;
+        let cover_radius = motion::lerp(morph.radius_from, morph.radius_to, p) / cover_scale;
         if let Some(overlay) = layers.overlay {
             style(
                 &overlay,
                 "transform",
-                &format!("translate3d({left:.3}px,{top:.3}px,0) scale({scale:.6})"),
+                &format!("translate3d({left:.3}px,{top:.3}px,0) scale({cover_scale:.6})"),
             );
-            style(&overlay, "border-radius", &format!("{radius:.2}px"));
+            style(&overlay, "border-radius", &format!("{cover_radius:.2}px"));
             style(&overlay, "opacity", "1");
         }
     }

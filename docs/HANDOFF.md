@@ -2,7 +2,28 @@
 
 > 每次改动后更新此表；入口约定已写入根目录 `AGENTS.md`。布局、交互、设置校验和动画以 Rust 为主，Android 只做必要的平台桥接。
 
-## 当前交付 · 0.5.15
+## 当前交付 · 0.5.17
+
+| 项目 | 状态 / 入口 |
+| :-- | :-- |
+| 日期、版本 | 2026-11-28 · 0.5.17-preview · versionCode44 |
+| 源码基线 | ebd9d6f，含昨天未提交的DeepSeek几何重构与今天性能修复；本表随最终代码提交推送main |
+| APK | APKs/Auralis-v0.5.17-preview.apk · 16243723字节 |
+| SHA256 | C7CE7CF7B872479E36DCDAD8FFB2F9D664BAF48015FB5BDD274F3733244E7620 |
+| 签名 | 原证书 a1dab650d1c39a63e21255150995b50e2cac236337e794c33a96e7db292cbfde；apksigner v2通过，可覆盖更新 |
+| 安装 / 发布 | 今天手机未连接，未安装，未测设备帧率或功耗；交付本地APK，源码推送main，不创建Release |
+| 旧包 | 新包构建/签名/回归通过后，按用户要求删除APKs/中0.5.13–0.5.16四个旧APK；只保留0.5.17及其校验文件；规则写入AGENTS.md |
+
+| 用户要求 / 问题 | 最终实现 / 审查 | 验证 / 限制 |
+| :-- | :-- | :-- |
+| Melox般连续展开，允许其他语言，注重流畅和能效 | DeepSeek实现，Codex审查。移除旧逐区位移补偿；共享容器用固定窗口盒+clip-path inset(round)表达可见卡片；页面仅translate/统一scale，封面独立路径，栏跟随卡片原点交接；Rust持有弹簧状态，不引入第二套媒体/账号状态 | 昨天code43手机Layout41–43/900ms、回调P95约33–50ms，不作为完成版；本轮桌面layout预算及可见几何回归通过。没有直接复制GPL Kotlin，不改项目MIT；上游参考及许可范围见下面历史记录 |
+| 消除逐帧布局 | lib.rs::write_sheet_pose/settle_sheet_pose/measure_sheet/apply_sheet；render.rs::player；style.css::.player-sheet；motion.rs::sheet_rect/sheet_blend | 相同工具读取code43真实APK引擎时Layout41/40/40，新版独立复跑6/5/5，Layout约0.6ms、Paint约5ms/900ms；桌面回调P95约16.7–16.8ms且无>25ms。不能等同手机呈现帧率或节能 |
+| 反向/交接/裁剪 | tools/sheet-geometry.cjs解析真实computed clip而非layout box；check-player-morph保留单调、落点、无重叠、标题交接、关闭末帧与反向断言；修复旧CSS过渡污染关闭端点、暖重开pointer-events缓存 | Codex独立复跑perf/morph/handoff/rapid全通过；UI38/core44/Java4组与完整WASM/NDK/Gradle通过；DeepSeek报告其余完整UI/歌词复用等回归通过。今天无设备验证 |
+| 下一位AI | 先使用0.5.17测手机实际观感/掉帧/功耗，再决定是否采用原生呈现层；用户已解除严格Rust-only限制，AGENTS.md同步更新 | 不以桌面CDP回调宣称手机满帧或低功耗；个人录屏不公开。新版APK通过后清理旧交付包，不删除.tmp或其他证据 |
+
+---
+
+## 0.5.15 历史交付
 
 | 项目 | 状态 / 入口 |
 | :-- | :-- |
@@ -16,6 +37,33 @@
 | :-- | :-- | :-- |
 | 背景先展开，控件藏起来后突然出现 | motion.rs::sheet_blend将背景与内容改成同一0–20%显现时钟，移除控件10–60%立方延迟。lib.rs::SheetLayers缓存各内容区offsetTop；apply_sheet按容器垂直几何连续移动标题、分页与footer，保留文字比例 | 不再仅移动整块内容，避免控制区位于屏幕下方直到展开完成；真正结束时每区位移归零。重新测量封面前清理旧section变换 |
 | 回归 | 构建成功；WASM handoff、stability、9种快速反向通过；手机尾段反向、8轮快速开关通过 | 第一次调试连接早于应用启动，重连后通过；无数据清除、无歌曲/登录改变。尚未做两款应用逐像素对齐、GPU呈现帧率或完整UI再回归；不能声称完全一致 |
+
+---
+
+## DeepSeek工作记录（历史过程，最终交付以上表为准）
+
+> 版本号、APK 与 SHA256 本次均**未改动**；未提交、未推送。本轮**未执行任何安装命令**；今天手机未连接，设备端安装状态未核查（上一版 code43 由 Codex 于 2026-11-27 23:47 构建/安装，早于本轮）。
+> 以下仅描述工作区里等待审查的实现，设备行为尚未验证。
+
+| 项目 | 内容 |
+| :-- | :-- |
+| 源码基线 | ebd9d6f（0.5.15 / code42）；改动只涉及 `ui/src/*`、`tools/`、本文档 |
+| 新入口 | `ui/src/lib.rs::measure_sheet / apply_sheet / begin_sheet / finish_sheet_close`，`ui/src/motion.rs::sheet_rect / sheet_scale / sheet_blend`，`ui/src/render.rs::player`（`#player-sheet` 包裹），`ui/src/style.css` 的 `.player-sheet` / `.player-safe` |
+| 新工具 | `tools/check-player-morph.cjs`、`tools/check-player-perf.cjs`、`tools/sheet-geometry.cjs` |
+
+| 请求 / 问题 | 实现 | 验证 / 限制 |
+| :-- | :-- | :-- |
+| 用户多次反馈展开「像遮罩」、控件藏掉再出现；要求 Melox 那样真正连贯的共享容器/封面/标题/控制变形 | 真正的共享容器：`#player-sheet` 是**固定窗口大小的盒子**，卡片矩形由内联 `clip-path: inset(T R B L round R)` 表达（`motion::sheet_rect` 提供矩形与圆角），所以容器**从不改变布局盒**。页面 `.player-safe` 在展开开始时一次性写入最终像素宽高（411×914），此后**只**按容器宽度做统一缩放（`motion::sheet_scale`）并用一个 `translate3d + scale` 跟随卡片原点，页面底部被卡片下沿裁掉，footer 控件随下沿连续露出而不是靠延迟淡入。删除 0.5.15 的 per-section `offsetTop*(sy/sx-1)` 补偿、`content_rows` 逐行 `offset_top` 测量，以及 `.player-surface` 的非等比 `scale(sx,sy)`。 | 根因用同一工具在基线上复现：基线首个失败断言为 `Sections ".player-toolbar" and ".player-identity" overlap by 48.1px at container 103px`；对同一批帧继续统计，`#player-pages`/`.page-dots` 重叠 **426px**，`identity→pages` 渲染间距 **9px** 而统一缩放要求 **85px**，直到容器 859px 仍有 29px 重叠。`motion.rs` 纯 Rust 单测覆盖端点/单调/分区不重叠/间距=缩放/底部裁剪；`check-player-morph` 在基线失败、当前实现通过 |
+| 封面、标题、控制必须连续 | 封面是独立共享元素：尺寸随进度线性、横向 ease-out、纵向线性+立方混合、圆角按渲染半径插值，落点与真实 `#cover-art` 重合后才交接；关闭方向反之，落回歌曲栏封面（`.mini-art`）后才交接。歌曲栏内容被平移到卡片左上角（贴着卡片长出来）而不是原地淡出；页面是刚性布局，只被容器裁剪揭示；`motion::sheet_blend` 在弹簧前段完成「栏→页」交叉淡入。 | `check-player-morph` 断言每帧容器/页面/分区几何、栏贴住卡片左上角（≤2px）、封面面积与尺寸单调、标题有效可见度、控制带 y/h 轨迹与可见度单调，以及关闭末帧容器回到静止栏、共享封面落回栏封面（≤2.5px）。标题是「刚性页 + 两节点交叉淡入」而非单节点几何 tween（与参考同构），已写入限制 |
+| 可中断、快速反向保留速度、关闭回到歌曲栏 | 反向只改弹簧目标，不重新测量、不重新挂载 overlay；关闭时先把歌曲栏恢复折叠态再以该栏为终点测量；`finish_sheet_close` 复位栏 `transform/opacity`、页面 `transform`、`sharing-artwork`、dock inert 并把 `#mini-player` 的内联 `transition` 移除。**关键修复**：`#mini-player` 原本有 `transition:transform .24s`，若在过渡期写 `transform:none` 后同 tick 读取会拿到过渡中的旧值，导致关闭时 `geometry.from` 读成 (0,0) 而不是歌曲栏；现已在整个过渡期设 `transition:none` 并在结束时恢复。 | `check-player-rapid-toggle`（9 组延迟反向）、`check-player-handoff` 通过；`check-player-morph` 新增关闭收敛断言（容器 x/y 回到静止栏、封面落回栏封面）后先失败、修复后通过 |
+| 不逐帧读 layout、播放 pulse 不重置动画 | `cache_sheet_layers` 只做 DOM 查询；`measure_sheet` 每次 transition 一次三段式「复位写入 → 一次布局 flush → 批量读端点」；`apply_sheet` 只写不读；`paint_player`/`paint_mini` 在 markup 未替换时复用缓存，不再每 pulse 重新查询/测量或重挂 overlay。 | 页面布局盒在 transition 内固定；`advance_mini` 在展开期间冻结歌曲栏膨胀；pulse 实测（`tools/profile-player-pulse.cjs`，30 次播放/暂停）：LayoutCount 每 pulse 3→3、RecalcStyle 每 pulse 4→3（`device-debug/rust-ui/motion/pulse-before.json` / `pulse-after.json`） |
+| 复用/缓存/减少动态 | 歌词节点、`#player-pages`、`#cover-art` 全部保留；`will-change` 只在 `#player.sheet-morphing` 期间开启，静止后恢复普通图层树；非相交分页仍用 `content-visibility` 裁掉；环境光仍 30Hz。 | `check-player-stability` 证明歌词视口/封面/分页节点复用；未测手机功耗 |
+| code43 实机长帧（Layout 41–43/900ms、rAF P95 33–50ms） | 先复现再修：用同一工具对 **从 code43 APK 解出的 UI 资源**（`AURALIS_UI_DIR`）复测，桌面同样得到 Layout 40–41/900ms，确认不是设备个体问题。改法是「固定 box + compositor clip + 直接窄写入」：`#player-sheet` 尺寸恒定，卡片由内联 `clip-path` 裁剪；页面用 `translate3d + scale`；**不再把位姿写进继承的自定义属性**（实测继承变量会让整棵播放器子树每帧重算样式，Recalc 10→31ms，比省下的布局更贵）；**也不再临时提升模糊背景到独立图层**（会让首帧重新栅格化模糊，p95 16.8→33.4ms）。 | 同一 900ms 暖开场、同一 `tools/check-player-perf.cjs`、桌面 Chromium：LayoutCount **40–41 → 5–6**、LayoutDuration **4.58–5.19 → 0.39–0.85ms**、Paint **143–146 次/18.9–22.2ms → 105–107 次/3.9–5.7ms**、TaskDuration **57–70 → 38–48ms**、RecalcStyle 次数与耗时基本不变（40–41 / 7.7–10.2 → 40–41 / 8.3–9.2ms）、rAF p95 16.7–16.8ms 且无 >25ms 帧。**设备未测**：以上是桌面 Chromium，不能等同于手机 GPU/功耗；设备复测由 Codex 负责 |
+| 实现语言选择（用户已放宽 Rust-only） | 仍用 Rust 持有动画状态/进度/时序（`motion.rs` 闭式弹簧 + `lib.rs` 几何写入），CSS 只承担呈现与合成属性。理由：播放器页面、歌词、分页、手势与原生桥接都在同一 WebView/DOM 里，把这一处换成 Compose 原生层需要第二套渲染面并复制状态与手势，账号/播放连续性风险高；Android View 只能整体变换/裁剪 WebView，无法只变换播放器子树。 | `git status` 无任何 `android/**/*.kt` 或应用 JS 改动，唯一 JS 变更是测试探针；未新增 Kotlin 布局或 JS 动画控制器 |
+| 回归 | `cargo test --manifest-path ui/Cargo.toml -- --list` = 38 项（`ui/src` 34 项 + 经 `#[path]` 纳入的 `core/src/artwork.rs` 4 项）全部通过；`./build-ui.ps1 -Offline` 成功且无警告；`check-rust-ui`、`check-player-handoff`、`check-player-rapid-toggle`、`check-player-stability`、`check-dock-layout`、`check-player-motion`、`check-player-morph`、`check-player-perf`、`profile-player-pulse` 全部通过。 | 同一工具 A/B：`check-player-perf` 在 code43 引擎上失败（`LayoutCount 41 in 900ms (budget 6)`）、当前实现通过；`check-player-morph` 在 code43 与当前实现上都通过（证明几何断言没有被放松，且读取的是真实可见裁剪矩形——`tools/sheet-geometry.cjs` 优先解析 `clip-path`，旧实现回退到 surface 盒）。逐帧/性能证据在 `device-debug/rust-ui/morph/{open-frames.json,close-frames.json,report.json,perf-before-code43.json,perf-final.json}`。Playwright 均在桌面 Chromium 运行，无手机安装/设备帧率结论 |
+| 许可证边界 | 只参考 Melox（上游根 GPL-3.0，commit ecd04c5e8d77993071263a38b4cee5b5ddcec8ba）的**可观察行为与数学时序**：容器矩形线性插值、页面按宽度统一缩放、封面中心缓动的分段曲线、交接门槛量级。Rust 代码为独立实现，未复制其 Kotlin 源、未逐行翻译、未引入其 `GraphicsLayer` 记录/渲染器。本仓库仍 MIT。 | 若将来确需直接移植 GPL 实现，须先单独说明移植范围与兼容许可处理方案；本次未做，也未改动整体许可证。残余风险：封面路径的 `ease-out` 与 `p³*0.6+p*0.4` 分段权重与参考同构，属已披露的时序参考而非独立推导，需在发布说明中保持同样的披露 |
+| 清理与恢复（本次操作声明） | 本次**未删除任何 APK**，也未删除其它无关文件；对 `APKs/` 只做了只读解包（`APKs/Auralis-v0.5.16-preview.apk` → `device-debug/code43-ui/`，`device-debug/` 本就在 `.gitignore`）。早前一次误操作是用 `Remove-Item -Recurse -Force .tmp` 删掉了仓库根的整个 `.tmp` 目录（本意只删自己的临时文件）；`.tmp` 未入 git，`Remove-Item` 不进回收站，**无法从 git 恢复**，只能重新生成。若 `APKs/` 里的旧包有缺失，可恢复路径是 GitHub Releases 或按对应 commit 重新构建（`APKs/` 已在 `.gitignore`，git 无法恢复）。 | 按用户最新要求，旧 APK 的最终清理由 Codex 在验证通过后负责，本次不清理任何文件 |
+| 限制 / 下一步 | 桌面 Chromium 通过；过渡期间整页按容器宽度统一缩放，文字在这 ~250ms 内按缩放栅格化，落地时 `transform` 置 `none` 恢复原生清晰度；页面底边只有到 p=1 才到达窗口底边，所以 footer 控件在展开末段才被裁出（与参考实现同构）；标题/控制是「刚性页 + 交叉淡入」而非单节点 tween。 | 下一步由 Codex 构建安装到手机，实测设备观感、实际呈现帧率与功耗；若要标题也做单节点几何 tween，需要把 `.player-identity` 从歌曲栏标题矩形插值到自身布局矩形，这会改变文字缩放与两节点交接策略，应单独评估；若设备上要求控制区更早露出，应改容器底边到达曲线或页面布局，不要回到逐区补偿 |
 
 ---
 

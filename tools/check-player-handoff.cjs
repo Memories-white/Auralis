@@ -1,6 +1,7 @@
 // Regression for the user's return/reopen recording. Real WASM; no phone FPS claim.
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const {CARD_RECT_SOURCE}=require('./sheet-geometry.cjs');
 const root=path.resolve(__dirname,'..'),assets=path.join(root,'android/app/src/main/assets/ui');
 const output=path.join(root,'device-debug/rust-ui/handoff');fs.mkdirSync(output,{recursive:true});
 const song={mid:'handoff-fixture',title:'A quiet return',artist:'Auralis study',coverUrl:'https://example.invalid/cover',duration:180};
@@ -10,11 +11,11 @@ const live={mid:song.mid,title:song.title,artist:song.artist,cover:song.coverUrl
  const page=await browser.newPage({viewport:{width:411,height:914},isMobile:true,hasTouch:true});
  await page.addInitScript(()=>{window.__actions=[];window.AuralisNative={postMessage:m=>window.__actions.push(JSON.parse(m))};});
  await page.route('**/*',route=>{const u=new URL(route.request().url());if(u.hostname==='example.invalid'||u.pathname==='/artwork')return route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500"><path fill="#e5ddd0" d="M0 0h500v500H0z"/><path fill="#253c61" d="M0 300h500v200H0z"/></svg>'});const file=path.resolve(assets,'.'+u.pathname);assert.ok(file.startsWith(assets+path.sep));return route.fulfill({contentType:file.endsWith('.wasm')?'application/wasm':file.endsWith('.js')?'text/javascript':'text/html',body:fs.readFileSync(file)});});
- await page.goto('https://auralis.local/index.html');await page.waitForFunction(()=>window.auralisUpdate);
+ await page.goto('https://auralis.local/index.html');await page.waitForFunction(()=>window.auralisUpdate);await page.evaluate(CARD_RECT_SOURCE+'; true;');
  const content=()=>page.evaluate(data=>auralisUpdate(JSON.stringify({type:'content',state:data})),data);
  await content();await page.evaluate(live=>auralisUpdate(JSON.stringify({type:'playback',state:live})),live);
  await page.waitForTimeout(300);await page.locator('#mini-player .mini-meta').click();await page.waitForTimeout(800);
- const frames=await page.evaluate(async()=>{const frames=[];document.querySelector('[data-action=close_player]').click();const start=performance.now();await new Promise(resolve=>{function frame(){const surface=document.querySelector('#player-surface'),mini=document.querySelector('#mini-player'),nav=document.querySelector('#navigation');const box=surface.getBoundingClientRect(),m=mini.getBoundingClientRect();frames.push({time:performance.now()-start,p:(box.height-m.height)/(innerHeight-m.height),surface:Number(getComputedStyle(surface).opacity),mini:Number(getComputedStyle(mini).opacity),dockZ:Number(getComputedStyle(document.querySelector('#dock')).zIndex),playerZ:Number(getComputedStyle(document.querySelector('#player')).zIndex),nav:Number(getComputedStyle(nav).opacity),mounted:document.querySelector('#player').classList.contains('mounted')});if(performance.now()-start<900)requestAnimationFrame(frame);else resolve();}requestAnimationFrame(frame);});return frames;});
+ const frames=await page.evaluate(async()=>{const frames=[];document.querySelector('[data-action=close_player]').click();const start=performance.now();await new Promise(resolve=>{function frame(){const surface=document.querySelector('#player-surface'),mini=document.querySelector('#mini-player'),nav=document.querySelector('#navigation');const card=window.__auralisCard(),m=mini.getBoundingClientRect();frames.push({time:performance.now()-start,p:(card.h-m.height)/(innerHeight-m.height),surface:Number(getComputedStyle(surface).opacity),mini:Number(getComputedStyle(mini).opacity),dockZ:Number(getComputedStyle(document.querySelector('#dock')).zIndex),playerZ:Number(getComputedStyle(document.querySelector('#player')).zIndex),nav:Number(getComputedStyle(nav).opacity),mounted:document.querySelector('#player').classList.contains('mounted')});if(performance.now()-start<900)requestAnimationFrame(frame);else resolve();}requestAnimationFrame(frame);});return frames;});
  fs.writeFileSync(path.join(output,'return-frames.json'),JSON.stringify(frames,null,2));
  const tail=frames.filter(f=>f.p>.02&&f.p<.12);assert.ok(tail.length>=2,'Return sampling missed the handoff');
  assert.ok(tail.every(f=>f.surface<.7),'Shrunk full-player background still obscures the mini-player');
@@ -33,7 +34,7 @@ const live={mid:song.mid,title:song.title,artist:song.artist,cover:song.coverUrl
  await cdp.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});await page.waitForTimeout(650);
  assert.ok(Math.abs(await page.locator('#player-pages').evaluate(e=>Number(e.style.getPropertyValue('--page')))-1)<.001,'Cancelled pager did not spring back');
  await page.locator('[data-action=player_lyrics]').click();await page.waitForTimeout(650);
- const reverse=await page.evaluate(async()=>{const first=auralisBack(),second=auralisBack();await new Promise(r=>setTimeout(r,100));const layer=document.querySelector('#player-surface'),before=layer.style.transform;auralisUpdate(JSON.stringify({type:'open_player'}));return {first,second,continuous:before===layer.style.transform,visible:document.querySelector('#player').classList.contains('visible')};});
+ const reverse=await page.evaluate(async()=>{const first=auralisBack(),second=auralisBack();await new Promise(r=>setTimeout(r,100));const pose=()=>{const c=window.__auralisCard();return c?[c.x,c.y,c.w,c.h,c.radius].map(v=>v.toFixed(2)).join('|'):'none';},before=pose();auralisUpdate(JSON.stringify({type:'open_player'}));return {first,second,continuous:before===pose(),visible:document.querySelector('#player').classList.contains('visible')};});
  assert.deepEqual(reverse,{first:true,second:true,continuous:true,visible:true},'Lyrics-page return/reopen restarted the transition or leaked a second Back');
  await page.waitForTimeout(700);
  await page.evaluate(()=>auralisBack());
